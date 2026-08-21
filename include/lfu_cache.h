@@ -1,0 +1,22 @@
+#pragma once
+#include <cstdint>
+#include <iostream>
+#include <unordered_map>
+#include <vector>
+#include "cache.h"
+
+class HeapLFUCache: public Cache {
+    std::vector<CacheBlock> cache_heap_;
+    std::unordered_map<uint64_t, size_t> cache_map_;
+    std::unordered_map<uint64_t, uint64_t> access_map_;
+    bool is_absolute_;
+public:
+    HeapLFUCache(uint64_t max_size, bool is_absolute);
+    using Cache::insert_block;
+    using Cache::remove_block;
+    using Cache::record_access;
+    void insert_block(CacheBlock block);    // might evict blocks to make space
+    void remove_block(CacheBlock block);
+    void evict_block();                     // removes tail
+    void record_access(CacheBlock block);
+};

@@ -37,11 +37,10 @@ struct CacheBlock {
 };
 
 class Cache {
-protected:
+public:
     uint64_t max_size_;
     uint64_t curr_size_;
     uint64_t block_count_;
-public:
     Cache(uint64_t max_size) {
         max_size_ = max_size;
         curr_size_ = 0;

@@ -61,10 +61,12 @@ struct Record {
     uint64_t touched_blocks = 0;
     std::vector<Block> blocks;
 
-    // Only relevant for iterator records, since those are per-file
     uint64_t file_id = 0;
-    uint64_t level = 0;
-    uint64_t new_level = 0;
+    uint8_t level = 0;
+    uint8_t new_level = 0;
+    uint32_t entry_count = 0;
+    uint32_t file_size = 0;
+
     uint64_t iter_id = 0;
     uint64_t caller = 0;
 
@@ -76,7 +78,7 @@ struct Record {
 class RecordParser {
     static constexpr uint8_t get_field_count = 8;
     static constexpr uint8_t iterator_field_count = 11;
-    static constexpr uint8_t file_event_field_count = 7;
+    static constexpr uint8_t file_event_field_count = 9;
 
     bool parse_get(Record* out_record, const std::string& record_string);
     bool parse_iterator(Record* out_record, const std::string& record_string);

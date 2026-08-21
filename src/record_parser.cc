@@ -183,9 +183,11 @@ bool RecordParser::parse_file_event(Record* out_record, const std::string& read_
     out_record->timestamp = string_view_to_number(fields[2], success);
     out_record->cf_id = string_view_to_number(fields[4], success);
     out_record->file_id = string_view_to_number(fields[5], success);
-    out_record->level = string_view_to_number(fields[6], success);
-    if (fields.size() > 7)
-        out_record->new_level = string_view_to_number(fields[7], success);
+    out_record->entry_count = string_view_to_number(fields[6], success);
+    out_record->file_size = string_view_to_number(fields[7], success);
+    out_record->level = string_view_to_number(fields[8], success);
+    if (fields.size() > 9)
+        out_record->new_level = string_view_to_number(fields[9], success);
     if (!success) return false;
 
     if (fields[3] == "create") out_record->record_type = kFileCreate;

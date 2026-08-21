@@ -20,6 +20,7 @@ public:
     using Cache::record_access;
     
     void advance_lookahead();
+    bool block_exists(CacheBlock block) {return cache_map_.find(block.hash()) != cache_map_.end();}
     void insert_block(CacheBlock block) override;   // might evict blocks to make space
     void remove_block(CacheBlock block) override;
     void evict_block() override;

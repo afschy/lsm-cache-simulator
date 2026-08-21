@@ -47,6 +47,11 @@ public:
         block_count_ = 0;
     }
     virtual ~Cache() = default;
+    virtual bool block_exists(CacheBlock block)=0;
+    virtual bool block_exists(BlockType block_type, uint64_t file_id, uint64_t block_id, uint8_t level, uint64_t size) {
+        CacheBlock block(block_type, file_id, block_id, level, size);
+        return block_exists(block);
+    }
     virtual void insert_block(CacheBlock block)=0;    // might evict blocks to make space
     virtual void insert_block(BlockType block_type, uint64_t file_id, uint64_t block_id, uint8_t level, uint64_t size) {
         CacheBlock block(block_type, file_id, block_id, level, size);

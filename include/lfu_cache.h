@@ -15,6 +15,7 @@ public:
     using Cache::insert_block;
     using Cache::remove_block;
     using Cache::record_access;
+    bool block_exists(CacheBlock block) {return cache_map_.find(block.hash()) != cache_map_.end();}
     void insert_block(CacheBlock block);    // might evict blocks to make space
     void remove_block(CacheBlock block);
     void evict_block();                     // removes tail

@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     LRUCache lru(config.cache_size);
     HeapLFUCache lfu(config.cache_size, false);
     HeapLFUCache lfu_absolute(config.cache_size, true);
-    OptimalCache optimal(config.cache_size, config.max_lookahead);
+    OptimalCache optimal(config.cache_size, config.optimal_lookahead);
     LRUCache modular(config.cache_size);
 
     auto lru_res = filter_simulate_normal(argv[1], config, &lru);

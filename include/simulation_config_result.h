@@ -13,7 +13,8 @@ struct SimulationConfig {
     uint64_t default_block_size = 4096;
     uint8_t shard_count = 1;
     uint8_t bits_per_key = 16;
-    uint16_t max_lookahead = 1000;
+    uint16_t optimal_lookahead = 1000;
+    uint16_t modular_lookahead = 100;
     uint32_t series_per_record = 10000;
     uint32_t filter_keys_per_block = default_block_size * 8 / bits_per_key;
 
@@ -40,7 +41,7 @@ struct SimulationConfig {
                 if (number <= UINT8_MAX) shard_count = number;
             }
             else if (key == "max_lookahead") {
-                if (number <= UINT16_MAX) max_lookahead = number;
+                if (number <= UINT16_MAX) optimal_lookahead = number;
             }
             else if (key == "bits_per_key") {
                 if (number <= UINT8_MAX) bits_per_key = number;
@@ -56,19 +57,27 @@ struct SimulationConfig {
 struct SimulationResult {
     uint32_t hit_count = 0;
     uint32_t miss_count = 0;
+    uint32_t extra_read_count = 0;
     std::vector<uint32_t> hit_series;
     std::vector<uint32_t> miss_series;
+    std::vector<uint32_t> extra_read_series;
     uint32_t series_per_record = 10000;
 
     std::string result_filename = "result.txt";
     std::string cache_policy_name = "default";
+
+    void push() {
+        hit_series.push_back(hit_count);
+        miss_series.push_back(miss_count);
+        extra_read_series.push_back(extra_read_count);
+    }
 
     void generate_result_filename(const SimulationConfig& config) {
         result_filename = cache_policy_name
                         + "_cs" + std::to_string(config.cache_size)
                         + "_dbs" + std::to_string(config.default_block_size)
                         + "_sc" + std::to_string(config.shard_count)
-                        + "_look" + std::to_string(config.max_lookahead)
+                        + "_look" + std::to_string(config.optimal_lookahead)
                         + "_bpk" + std::to_string(config.bits_per_key)
                         + ".log";
         series_per_record = config.series_per_record;

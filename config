@@ -2,5 +2,6 @@ cache_size 524288
 default_block_size 4096
 shard_count 1
 bits_per_key 16
-max_lookahead 1000
+optimal_lookahead 1000
+modular_lookahead 100
 series_per_record 10000

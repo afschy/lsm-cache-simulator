@@ -6,11 +6,19 @@ INC_DIR  := include
 BUILD_DIR := build
 BIN_DIR  := bin
 
+# Default to half the machine's cores (rounded up, min 1).
+# An explicit -jN on the command line still overrides this.
+NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+JOBS  := $(shell echo $$(( ($(NPROC) + 1) / 2 )))
+MAKEFLAGS += -j$(JOBS)
+
 CXX      := g++
 CXXSTD   := -std=c++20
 WARN     := -Wall -Wextra -Wpedantic
 OPT      := -O2
-CXXFLAGS := $(CXXSTD) $(WARN) $(OPT) -I$(INC_DIR) -MMD -MP
+SAN      := -fsanitize=address,undefined
+# Deferred (=) not immediate (:=) so `debug:`'s OPT override reaches the compile lines.
+CXXFLAGS = $(CXXSTD) $(WARN) $(OPT) -I$(INC_DIR) -MMD -MP
 LDFLAGS  :=
 LDLIBS   := -lzstd
 
@@ -22,9 +30,11 @@ DEPS := $(OBJS:.o=.d)
 
 all: $(BIN_DIR)/$(TARGET)
 
-debug: OPT := -O0 -g -fsanitize=address,undefined
-debug: LDFLAGS += -fsanitize=address,undefined
-debug: clean all
+# Recursive rather than `debug: clean all`, which races under -j: clean can delete
+# objects while all is compiling them.
+debug:
+	$(MAKE) clean
+	$(MAKE) OPT="-O0 -g $(SAN)" LDFLAGS="$(LDFLAGS) $(SAN)"
 
 $(BIN_DIR)/$(TARGET): $(OBJS) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)

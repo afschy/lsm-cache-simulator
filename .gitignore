@@ -57,6 +57,7 @@ compile_commands.json
 *.bak
 *.swp
 *.zst
+*.trace
 
 # vcpkg
 vcpkg_installed/

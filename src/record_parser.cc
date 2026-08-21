@@ -196,3 +196,10 @@ bool RecordParser::parse_file_event(Record* out_record, const std::string& read_
     else return false;
     return true;
 }
+
+void FileMetadata::parse_from_record(const Record& record) {
+    file_id = record.file_id;
+    level = record.level;
+    entry_count = record.entry_count;
+    file_size = record.file_size;
+}

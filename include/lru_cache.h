@@ -16,4 +16,5 @@ public:
     void remove_block(CacheBlock block);
     void evict_block();                     // removes tail
     void record_access(CacheBlock block);
+    std::string get_name(){return "LRU";}
 };

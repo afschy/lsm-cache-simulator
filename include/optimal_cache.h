@@ -31,4 +31,5 @@ public:
     void add_lookahead(CacheBlock block) {lookahead_.push_back(block);}
     void clear_lookahead() {lookahead_.clear();}
     size_t get_lookahead_size() {return lookahead_.size();}
+    std::string get_name(){return "OPTIMAL";}
 };

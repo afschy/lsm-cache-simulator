@@ -63,4 +63,5 @@ public:
         CacheBlock block(block_type, file_id, block_id, 0, 0);
         record_access(block);
     }
+    virtual std::string get_name()=0;
 };

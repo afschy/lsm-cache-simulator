@@ -19,4 +19,8 @@ public:
     void remove_block(CacheBlock block);
     void evict_block();                     // removes tail
     void record_access(CacheBlock block);
+    std::string get_name() {
+        if (is_absolute_) return "LFUABS";
+        else return "LFU";
+    }
 };

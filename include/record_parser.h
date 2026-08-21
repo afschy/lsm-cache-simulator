@@ -75,6 +75,17 @@ struct Record {
     void reset();
 };
 
+struct FileMetadata {
+    uint64_t file_id;
+    uint8_t level;
+    uint32_t entry_count;
+    uint32_t file_size;
+
+    FileMetadata(){};
+    FileMetadata(const Record& record) {parse_from_record(record);}
+    void parse_from_record(const Record& record);
+};
+
 class RecordParser {
     static constexpr uint8_t get_field_count = 8;
     static constexpr uint8_t iterator_field_count = 11;

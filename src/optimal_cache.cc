@@ -3,9 +3,14 @@
 #include <map>
 #include "optimal_cache.h"
 
-void OptimalCache::advance_lookahead() {
+bool OptimalCache::advance_lookahead() {
     auto block = lookahead_.front();
+    if (cache_map_.find(block.hash()) != cache_map_.end()) {
+        record_access(block);
+        return true;
+    }
     insert_block(block);
+    return false;
 }
 
 void OptimalCache::insert_block(CacheBlock block) {

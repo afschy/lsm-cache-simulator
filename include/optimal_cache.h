@@ -5,13 +5,12 @@
 #include <unordered_map>
 #include "cache.h"
 
-class OptimalCache: public Cache {
-    std::deque<CacheBlock> lookahead_;
-    uint32_t max_lookahead_;
-
+class OptimalCache: public Cache {    
     std::list<CacheBlock> block_list_;
     std::unordered_map<uint64_t, std::list<CacheBlock>::iterator> cache_map_;
 public:
+    uint32_t max_lookahead_;
+    std::deque<CacheBlock> lookahead_;
     OptimalCache(uint64_t max_size, uint32_t max_lookahead)
         :Cache(max_size), max_lookahead_(max_lookahead) {}
 
@@ -19,7 +18,7 @@ public:
     using Cache::remove_block;
     using Cache::record_access;
     
-    void advance_lookahead();
+    bool advance_lookahead();   // Returns true if hit, false if miss
     bool block_exists(CacheBlock block) {return cache_map_.find(block.hash()) != cache_map_.end();}
     void insert_block(CacheBlock block) override;   // might evict blocks to make space
     void remove_block(CacheBlock block) override;

@@ -10,18 +10,20 @@ enum class BlockType: uint8_t {
 
 struct CacheBlock {
     BlockType block_type_ = BlockType::kUndefined;
-    uint64_t file_id_ = 0;
-    uint64_t block_id_ = 0;
-    uint8_t level_ = 0;
+    uint64_t file_id_ = UINT64_MAX;
+    uint64_t block_id_ = UINT64_MAX;
+    uint8_t level_ = UINT8_MAX;
     uint64_t size_ = 0;
+    uint64_t lookup_id_ = UINT64_MAX;
     uint32_t access_count = 0;
 
-    CacheBlock(BlockType block_type, uint64_t file_id, uint64_t block_id, uint8_t level, uint64_t size) {
+    CacheBlock(BlockType block_type, uint64_t file_id, uint64_t block_id, uint8_t level, uint64_t size, uint64_t lookup_id=UINT64_MAX) {
         block_type_ = block_type;
         file_id_ = file_id;
         block_id_ = block_id;
         level_ = level;
         size_ = size;
+        lookup_id_ = lookup_id;
     }
     CacheBlock(){}
 

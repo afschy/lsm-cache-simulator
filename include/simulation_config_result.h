@@ -40,8 +40,11 @@ struct SimulationConfig {
             else if (key == "shard_count") {
                 if (number <= UINT8_MAX) shard_count = number;
             }
-            else if (key == "max_lookahead") {
+            else if (key == "optimal_lookahead") {
                 if (number <= UINT16_MAX) optimal_lookahead = number;
+            }
+            else if (key == "modular_lookahead") {
+                if (number <= UINT16_MAX) modular_lookahead = number;
             }
             else if (key == "bits_per_key") {
                 if (number <= UINT8_MAX) bits_per_key = number;
@@ -78,6 +81,7 @@ struct SimulationResult {
                         + "_dbs" + std::to_string(config.default_block_size)
                         + "_sc" + std::to_string(config.shard_count)
                         + "_look" + std::to_string(config.optimal_lookahead)
+                        + "_mlook" + std::to_string(config.modular_lookahead)
                         + "_bpk" + std::to_string(config.bits_per_key)
                         + ".log";
         series_per_record = config.series_per_record;
@@ -88,13 +92,18 @@ struct SimulationResult {
         fprintf(file, "total_count %u\n", hit_count+miss_count);
         fprintf(file, "hit_count %u\n", hit_count);
         fprintf(file, "miss_count %u\n", miss_count);
+        fprintf(file, "extra_read_count %u\n", extra_read_count);
         fprintf(file, "series_per_record %u\n", series_per_record);
         fprintf(file, "hit_series");
         for (uint32_t curr_hit : hit_series)
-            fprintf(file, "% u", curr_hit);
+            fprintf(file, " %u", curr_hit);
         fprintf(file, "\nmiss_series");
         for (uint32_t curr_miss : miss_series)
-            fprintf(file, "% u", curr_miss);
+            fprintf(file, " %u", curr_miss);
+        fprintf(file, "\nextra_read_series");
+        for (uint32_t curr_extra : extra_read_series)
+            fprintf(file, " %u", curr_extra);
         fprintf(file, "\n");
+        fclose(file);
     }
 };

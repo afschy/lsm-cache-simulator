@@ -46,8 +46,8 @@ ZSTDReader::ZSTDReader(const char* filepath) : filepath_(filepath == nullptr ? "
 ZSTDReader::~ZSTDReader() {
     if (dstream_ != nullptr) ZSTD_freeDStream(dstream_);
     if (file_ != nullptr) std::fclose(file_);
-    delete in_buf_;
-    delete out_buf_;
+    delete[] in_buf_;
+    delete[] out_buf_;
 }
 
 bool ZSTDReader::decode_more() {

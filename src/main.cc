@@ -17,13 +17,18 @@ int main(int argc, char** argv) {
     HeapLFUCache lfu(config.cache_size, false);
     HeapLFUCache lfu_absolute(config.cache_size, true);
     OptimalCache optimal(config.cache_size, config.optimal_lookahead);
-    LRUCache modular(config.cache_size);
+    OptimalCache modular(config.cache_size, config.optimal_lookahead);
 
     auto lru_res = filter_simulate_normal(argv[1], config, &lru);
+    std::cout << "LRU done" << std::endl;
     auto lfu_res = filter_simulate_normal(argv[1], config, &lfu);
+    std::cout << "LFU done" << std::endl;
     auto lfu_abs_res = filter_simulate_normal(argv[1], config, &lfu_absolute);
+    std::cout << "LFU-ABSOLUTE done" << std::endl;
     auto optimal_res = filter_simulate_optimal(argv[1], config, &optimal);
-    auto modular_res = filter_simulate_modular(argv[1], config, &modular);
+    std::cout << "OPTIMAL done" << std::endl;
+    auto modular_res = filter_simulate_optimal_modular(argv[1], config, &modular);
+    std::cout << "OPTIMAL-MODULAR done" << std::endl;
     
     lru_res.generate_result_filename(config); lru_res.write_result();
     lfu_res.generate_result_filename(config); lfu_res.write_result();

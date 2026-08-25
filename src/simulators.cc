@@ -2,6 +2,7 @@
 #include <random>
 #include <iostream>
 #include <map>
+#include <deque>
 #include "simulators.h"
 #include "record_parser.h"
 
@@ -26,19 +27,13 @@ static void release_file(Cache* cache, const FileMetadata& file, const Simulatio
 }
 
 // should be only called for files that don't have the search key
-static bool get_filter_false_positive(uint8_t bpk) {
+// bpk is a double so that a filter split into more modules than it has bits per key stays representable
+static bool get_filter_false_positive(double bpk) {
     // with the optimal k = ln(2) * bpk, the false positive rate is e ^ (-bpk * ln(2)^2)
-    static const std::vector<double> fp_rate_table = []() {
-        const double ln2_squared = std::log(2.0) * std::log(2.0);
-        std::vector<double> table(UINT8_MAX + 1);
-        for (size_t i = 0; i <= UINT8_MAX; i++)
-            table[i] = std::exp(-ln2_squared * i);
-        return table;
-    }();
-
+    static const double ln2_squared = std::log(2.0) * std::log(2.0);
     static std::mt19937_64 generator(std::random_device{}());
     static std::uniform_real_distribution<double> distribution(0.0, 1.0);
-    return distribution(generator) < fp_rate_table[bpk];
+    return distribution(generator) < std::exp(-ln2_squared * bpk);
 }
 
 SimulationResult filter_simulate_normal(const char* trace_file_name, const SimulationConfig& config, Cache* cache) {
@@ -46,9 +41,11 @@ SimulationResult filter_simulate_normal(const char* trace_file_name, const Simul
     SimulationResult result;
     uint16_t curr_access = 0;
     std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
+    uint64_t records_parsed = 0;
 
     Record curr_record;
     while (parser.parse_next_record(&curr_record)) {
+        if ((++records_parsed & ((1<<20)-1)) == 0) std::cout << "parsed: " << records_parsed << std::endl;
         if (curr_record.record_type == kIterator) continue;
         if (curr_record.record_type == kFileCreate) {
             FileMetadata new_metadata(curr_record);
@@ -105,6 +102,7 @@ SimulationResult filter_simulate_normal(const char* trace_file_name, const Simul
 
     result.cache_policy_name = cache->get_name();
     if (curr_access) result.push();
+    std::cout << "parsed: " << records_parsed << std::endl;
     return result;
 }
 
@@ -116,6 +114,7 @@ SimulationResult filter_simulate_optimal(const char* trace_file_name, const Simu
     // key is <file_id,lookup_id>; stores the number of unnecessary lookups per file probe.
     // only the first filter block gets a file probe
     std::map<std::pair<uint64_t, uint64_t>, uint16_t> unnecessary_access_map;
+    uint64_t records_parsed = 0;
 
     // consumes the oldest lookahead entry; the caller must ensure the lookahead isn't empty
     auto consume_lookahead = [&]() {
@@ -138,6 +137,7 @@ SimulationResult filter_simulate_optimal(const char* trace_file_name, const Simu
 
     Record curr_record;
     while (parser.parse_next_record(&curr_record)) {
+        if ((++records_parsed & ((1<<20)-1)) == 0) std::cout << "parsed: " << records_parsed << std::endl;
         if (curr_record.record_type == kFileCreate) {
             FileMetadata new_metadata(curr_record);
             file_map[curr_record.file_id] = new_metadata;
@@ -183,9 +183,137 @@ SimulationResult filter_simulate_optimal(const char* trace_file_name, const Simu
 
     result.cache_policy_name = cache->get_name();
     if (curr_access) result.push();
+    std::cout << "parsed: " << records_parsed << std::endl;
     return result;
 }
 
-SimulationResult filter_simulate_modular(const char* trace_file_name, const SimulationConfig& config, Cache* cache) {
-    
+SimulationResult filter_simulate_optimal_modular(const char* trace_file_name, const SimulationConfig& config, OptimalCache* cache) {
+    RecordParser parser(trace_file_name);
+    SimulationResult result;
+    uint16_t curr_access = 0;
+    std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
+    std::unordered_map<uint64_t, uint64_t> empty_access_map;    // file_id to query miss count mapping in the current window
+    // key is <file_id,lookup_id>; stores the number of unnecessary lookups per file probe.
+    // only the first filter block gets a file probe
+    std::map<std::pair<uint64_t, uint64_t>, uint16_t> unnecessary_access_map;
+    uint64_t records_parsed = 0;
+
+    // consumes the oldest lookahead entry; the caller must ensure the lookahead isn't empty
+    auto consume_lookahead = [&]() {
+        CacheBlock lookahead_front = cache->lookahead_.front();
+        if (cache->advance_lookahead()) result.hit_count++;
+        else result.miss_count++;
+
+        if (++curr_access == config.series_per_record) {
+            curr_access = 0;
+            result.push();
+        }
+
+        if (lookahead_front.block_id_ != 0) return;    // only the first block carries the probe
+        std::pair<uint64_t, uint64_t> key_pair(lookahead_front.file_id_, lookahead_front.lookup_id_);
+        auto it = unnecessary_access_map.find(key_pair);
+        if (it == unnecessary_access_map.end()) return;
+        result.extra_read_count += it->second;
+        unnecessary_access_map.erase(it);
+    };
+
+    std::deque<Record> next_get_records;
+    uint64_t get_counter = 0;
+    Record curr_record;
+    auto update_lookahead = [&]() {
+        const Record& get_record = next_get_records.front();
+        for (const Probe& curr_probe: get_record.probes) {
+            if (file_map.find(curr_probe.file_id) == file_map.end()) {
+                std::cerr << "Error: inconsistent simulation state, never-created file_id accessed\n";
+                exit(1);
+            }
+
+            std::vector<Block> filter_block_list;
+            get_filter_blocks(filter_block_list, file_map[curr_probe.file_id], config);
+
+            uint16_t module_count = filter_block_list.size();
+            if (!module_count) {
+                // nothing to read and nothing to filter with, so a miss always falls through to the data blocks
+                if (curr_probe.file_outcome == FileOutcome::kNotFound)
+                    result.extra_read_count += curr_probe.blocks.size();
+                continue;
+            }
+            // every module covers every key, so the file's bit budget is split evenly across them
+            double bpk_per_module = 1.00 * config.bits_per_key / module_count;
+
+            uint32_t higher_count = 0, lower_equal_count = 0, self_count = 0;
+            auto self_it = empty_access_map.find(curr_probe.file_id);
+            if (self_it != empty_access_map.end()) self_count = self_it->second;
+            for (const auto& it : empty_access_map) {
+                if (it.second > self_count) higher_count++;
+                else lower_equal_count++;
+            }
+
+            uint16_t used_modules = static_cast<uint16_t>(round(1.00 * module_count * lower_equal_count / (higher_count + lower_equal_count)));
+            if (!self_count) used_modules = 0;
+            else used_modules = std::max(uint16_t(1), used_modules);
+            used_modules = std::min(used_modules, module_count);
+
+            filter_block_list.resize(used_modules);
+            for (const Block& filter_block: filter_block_list) {
+                CacheBlock cache_block(BlockType::kFilter, curr_probe.file_id, filter_block.block_id, curr_probe.level, filter_block.uncomp_bytes, get_record.lookup_id);
+                cache->add_lookahead(cache_block);
+            }
+
+            if (curr_probe.file_outcome != FileOutcome::kNotFound) continue;
+
+            // the modules are independent, so every one of them has to report positive for a false positive
+            if (used_modules && !get_filter_false_positive(used_modules * bpk_per_module)) continue;
+
+            // with no module read there is no block to carry the probe into consume_lookahead
+            if (!used_modules) {
+                result.extra_read_count += curr_probe.blocks.size();
+                continue;
+            }
+            std::pair<uint64_t, uint64_t> key_pair(curr_probe.file_id, get_record.lookup_id);
+            unnecessary_access_map[key_pair] = curr_probe.blocks.size();
+        }
+
+        for (const Probe& curr_probe: get_record.probes) {
+            if (curr_probe.file_outcome != FileOutcome::kNotFound) continue;
+            auto it = empty_access_map.find(curr_probe.file_id);
+            if (it != empty_access_map.end() && !--it->second) empty_access_map.erase(it);
+        }
+        next_get_records.pop_front();
+    };
+
+    while (parser.parse_next_record(&curr_record)) {
+        if ((++records_parsed & ((1<<20)-1)) == 0) std::cout << "parsed: " << records_parsed << std::endl;
+        bool is_get = false;
+        if (curr_record.record_type == kFileCreate) {
+            FileMetadata new_metadata(curr_record);
+            file_map[curr_record.file_id] = new_metadata;
+        }
+        else if (curr_record.record_type == kFileMove) {
+            if (file_map.find(curr_record.file_id) != file_map.end())
+                file_map[curr_record.file_id].level = curr_record.new_level;
+        }
+        else if (curr_record.record_type == kGet) {
+            is_get = true;
+            get_counter++;
+            next_get_records.push_back(curr_record);
+            for (const Probe& probe: curr_record.probes)
+                if (probe.file_outcome == FileOutcome::kNotFound) empty_access_map[probe.file_id]++;
+        }
+        if (!is_get || get_counter < config.modular_lookahead)
+            continue;
+
+        update_lookahead();
+        while (cache->get_lookahead_size() > cache->get_max_lookahead())
+            consume_lookahead();
+    }
+
+    while (next_get_records.size()) update_lookahead();
+    while (cache->get_lookahead_size()) consume_lookahead();
+
+    // the cache is an OptimalCache here too, so the policy name has to distinguish the two runs
+    result.cache_policy_name = cache->get_name() + "_MODULAR";
+    if (curr_access) result.push();
+    std::cout << "parsed: " << records_parsed << std::endl;
+    return result;
 }

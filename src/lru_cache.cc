@@ -13,7 +13,7 @@ void LRUCache::insert_block(CacheBlock block) {
         return;
     }
 
-    block.access_count = 1;
+    block.access_count_ = 1;
     while(block.size_ > (max_size_ - curr_size_))
         evict_block();
     auto it = lru_block_list_.insert(lru_block_list_.begin(), block);
@@ -40,6 +40,6 @@ void LRUCache::record_access(CacheBlock block) {
     if (cache_map_.find(block.hash()) == cache_map_.end()) return;
 
     auto it = cache_map_[block.hash()];
-    it->access_count++;
+    it->access_count_++;
     lru_block_list_.splice(lru_block_list_.begin(), lru_block_list_, it);
 }

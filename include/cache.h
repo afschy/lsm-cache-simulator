@@ -15,7 +15,9 @@ struct CacheBlock {
     uint8_t level_ = UINT8_MAX;
     uint64_t size_ = 0;
     uint64_t lookup_id_ = UINT64_MAX;
-    uint32_t access_count = 0;
+    uint32_t access_count_ = 0;
+    uint64_t nearest_access_ = UINT64_MAX;
+    uint64_t insert_time_ = 0;
 
     CacheBlock(BlockType block_type, uint64_t file_id, uint64_t block_id, uint8_t level, uint64_t size, uint64_t lookup_id=UINT64_MAX) {
         block_type_ = block_type;

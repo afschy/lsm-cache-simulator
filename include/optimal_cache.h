@@ -1,18 +1,22 @@
 #pragma once
-#include <list>
 #include <queue>
 #include <deque>
 #include <unordered_map>
 #include "cache.h"
 
 class OptimalCache: public Cache {    
-    std::list<CacheBlock> block_list_;
-    std::unordered_map<uint64_t, std::list<CacheBlock>::iterator> cache_map_;
+    std::vector<CacheBlock> cache_heap_;                // max heap on the distance of first access
+    std::unordered_map<uint64_t, size_t> cache_map_;    // block hash to heap index
+    // block hash to sorted list of all access distances in lookahead.
+    // an entry is erased once its list empties, so a present entry is always non-empty
+    std::unordered_map<uint64_t, std::deque<uint64_t>> access_distance_map_;
 public:
     uint32_t max_lookahead_;
     std::deque<CacheBlock> lookahead_;
+    uint64_t lookahead_counter_ = 0;
+
     OptimalCache(uint64_t max_size, uint32_t max_lookahead)
-        :Cache(max_size), max_lookahead_(max_lookahead) {}
+        :Cache(max_size), max_lookahead_(max_lookahead) {cache_heap_.resize(1);}
 
     using Cache::insert_block;
     using Cache::remove_block;
@@ -28,7 +32,8 @@ public:
     void set_max_lookahead(uint32_t max_lookahead) {max_lookahead_ = max_lookahead;}
     uint32_t get_max_lookahead() {return max_lookahead_;}
     
-    void add_lookahead(CacheBlock block) {lookahead_.push_back(block);}
+    void add_lookahead(CacheBlock block);
+    void pop_lookahead_front();
     void clear_lookahead() {lookahead_.clear();}
     size_t get_lookahead_size() {return lookahead_.size();}
     std::string get_name(){return "OPTIMAL";}

@@ -80,6 +80,7 @@ struct FileMetadata {
     uint8_t level;
     uint32_t entry_count;
     uint32_t file_size;
+    bool deleted = false;
 
     FileMetadata(){};
     FileMetadata(const Record& record) {parse_from_record(record);}

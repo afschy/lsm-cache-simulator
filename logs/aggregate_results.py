@@ -105,22 +105,22 @@ def build_table(traces, policies, label, extract, scaled, scale):
 def write_markdown(path, set_name, tables, scale):
     lines = [f"# {set_name}", "",
              f"Counts scaled by 1/{scale:g}; miss_rate is a ratio.", ""]
-    # One width per column across every table, so the tables line up with each
-    # other and not just internally.
+    # A single width shared by every column of every table, so the whole file
+    # lines up as one grid.
     columns = len(tables[0][1][0])
-    widths = [max(len(row[i]) for _, rows in tables for row in rows)
-              for i in range(columns)]
+    width = max(len(c) for _, rows in tables for row in rows for c in row)
+
+    def render(cells):
+        return "| " + " | ".join(c.ljust(width) for c in cells) + " |"
+
+    rule = "|" + "|".join(["-" * (width + 2)] * columns) + "|"
 
     for label, rows in tables:
         header, *body = rows
-
-        def render(cells):
-            return "| " + " | ".join(c.ljust(w) for c, w in zip(cells, widths)) + " |"
-
         lines.append(f"## {label}")
         lines.append("")
         lines.append(render(header))
-        lines.append("|" + "|".join("-" * (w + 2) for w in widths) + "|")
+        lines.append(rule)
         lines.extend(render(row) for row in body)
         lines.append("")
     path.write_text("\n".join(lines))

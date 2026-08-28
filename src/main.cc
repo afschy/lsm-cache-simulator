@@ -17,8 +17,10 @@ int main(int argc, char** argv) {
     HeapLFUCache lfu(config.cache_size, false);
     HeapLFUCache lfu_absolute(config.cache_size, true);
     OptimalCache optimal(config.cache_size, config.optimal_lookahead);
-    OptimalCache optimal_modular(config.cache_size, config.optimal_lookahead);
-    HeapLFUCache backward_modular(config.cache_size, true);
+    LRUCache modular_lru(config.cache_size);
+    HeapLFUCache modular_lfu(config.cache_size, false);
+    HeapLFUCache modular_lfuabs(config.cache_size, true);
+    OptimalCache modular_optimal(config.cache_size, config.optimal_lookahead);
 
     auto lru_res = filter_simulate_normal(argv[1], config, &lru);
     std::cout << "LRU done" << std::endl;
@@ -28,14 +30,21 @@ int main(int argc, char** argv) {
     std::cout << "LFU-ABSOLUTE done" << std::endl;
     auto optimal_res = filter_simulate_optimal(argv[1], config, &optimal);
     std::cout << "OPTIMAL done" << std::endl;
-    auto optimal_modular_res = filter_simulate_optimal_modular(argv[1], config, &optimal_modular);
-    std::cout << "OPTIMAL-MODULAR done" << std::endl;
-    auto backward_modular_res = filter_simulate_modular(argv[1], config, &backward_modular);
+    auto modular_lru_res = filter_simulate_modular(argv[1], config, &modular_lru);
+    std::cout << "MODULAR-LRU done" << std::endl;
+    auto modular_lfu_res = filter_simulate_modular(argv[1], config, &modular_lfu);
+    std::cout << "MODULAR-LFU done" << std::endl;
+    auto modular_lfuabs_res = filter_simulate_modular(argv[1], config, &modular_lfuabs);
+    std::cout << "MODULAR-LFUABS done" << std::endl;
+    auto modular_optimal_res = filter_simulate_optimal_modular(argv[1], config, &modular_optimal);
+    std::cout << "MODULAR-OPTIMAL done" << std::endl;
     
     lru_res.generate_result_filename(config); lru_res.write_result();
     lfu_res.generate_result_filename(config); lfu_res.write_result();
     lfu_abs_res.generate_result_filename(config); lfu_abs_res.write_result();
     optimal_res.generate_result_filename(config); optimal_res.write_result();
-    optimal_modular_res.generate_result_filename(config); optimal_modular_res.write_result();
-    backward_modular_res.generate_result_filename(config); backward_modular_res.write_result();
+    modular_lru_res.generate_result_filename(config); modular_lru_res.write_result();
+    modular_lfu_res.generate_result_filename(config); modular_lfu_res.write_result();
+    modular_lfuabs_res.generate_result_filename(config); modular_lfuabs_res.write_result();
+    modular_optimal_res.generate_result_filename(config); modular_optimal_res.write_result();
 }

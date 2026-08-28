@@ -58,6 +58,8 @@ compile_commands.json
 *.swp
 *.zst
 *.trace
+logs/*.md
+logs/*.csv
 
 # vcpkg
 vcpkg_installed/

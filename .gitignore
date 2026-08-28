@@ -60,6 +60,7 @@ compile_commands.json
 *.trace
 logs/*.md
 logs/*.csv
+logs/*/*/config
 
 # vcpkg
 vcpkg_installed/

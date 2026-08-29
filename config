@@ -1,4 +1,5 @@
-cache_size 524288
+filter_cache_size 524288
+data_cache_size 524288
 default_block_size 4096
 shard_count 1
 bits_per_key 16

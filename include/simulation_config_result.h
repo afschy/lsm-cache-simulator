@@ -9,7 +9,8 @@
 #include <string>
 
 struct SimulationConfig {
-    uint64_t cache_size = 512 << 10;
+    uint64_t filter_cache_size = 512 << 10;
+    uint64_t data_cache_size = 512 << 10;
     uint64_t default_block_size = 4096;
     uint8_t shard_count = 1;
     uint8_t bits_per_key = 16;
@@ -35,7 +36,12 @@ struct SimulationConfig {
             auto result = std::from_chars(value.data(), value.data() + value.size(), number);
             if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) continue;
 
-            if (key == "cache_size") cache_size = number;
+            if (key == "cache_size") { 
+                filter_cache_size = number;
+                data_cache_size = number;
+            }
+            else if (key == "filter_cache_size") filter_cache_size = number;
+            else if (key == "data_cache_size") data_cache_size = number;
             else if (key == "default_block_size") default_block_size = number;
             else if (key == "shard_count") {
                 if (number <= UINT8_MAX) shard_count = number;
@@ -77,8 +83,9 @@ struct SimulationResult {
 
     void generate_result_filename(const SimulationConfig& config) {
         result_filename = cache_policy_name
-                        + "_cs" + std::to_string(config.cache_size)
-                        + "_dbs" + std::to_string(config.default_block_size)
+                        + "_fcs" + std::to_string(config.filter_cache_size)
+                        + "_dcs" + std::to_string(config.filter_cache_size)
+                        + "_bs" + std::to_string(config.default_block_size)
                         + "_sc" + std::to_string(config.shard_count)
                         + "_look" + std::to_string(config.optimal_lookahead)
                         + "_mlook" + std::to_string(config.modular_lookahead)

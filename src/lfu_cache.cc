@@ -1,7 +1,10 @@
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include "lfu_cache.h"
+#include <iostream>
+#include <utility>
 #include "heap_utils.h"
+#include "lfu_cache.h"
 
 HeapLFUCache::HeapLFUCache(uint64_t max_size, bool is_absolute): Cache(max_size) {
     cache_heap_.resize(1);

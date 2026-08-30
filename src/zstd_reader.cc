@@ -1,10 +1,12 @@
 #include "zstd_reader.h"
 
 #include <zstd.h>
+
+#include <cstddef>
+#include <cstdlib>
 #include <cstring>
-#include <stdexcept>
-#include <utility>
 #include <iostream>
+#include <stdexcept>
 
 constexpr size_t kInBufCapacity = ZSTD_BLOCKSIZE_MAX + 3;
 constexpr size_t kOutBufCapacity = ZSTD_BLOCKSIZE_MAX;

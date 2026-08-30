@@ -1,11 +1,17 @@
+#include <algorithm>
 #include <cmath>
-#include <random>
+#include <cstdint>
+#include <cstdlib>
+#include <deque>
 #include <iostream>
 #include <map>
-#include <deque>
-#include "simulators.h"
+#include <unordered_map>
+#include <utility>
+#include <vector>
+#include "cache.h"
 #include "record_parser.h"
 #include "simulator_utils.h"
+#include "simulators.h"
 
 SimulationResult filter_simulate_normal(const char* trace_file_name, const SimulationConfig& config, Cache* cache) {
     RecordParser parser(trace_file_name);

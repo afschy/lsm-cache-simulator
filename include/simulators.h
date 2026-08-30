@@ -1,3 +1,5 @@
+#pragma once
+#include "cache.h"
 #include "optimal_cache.h"
 #include "simulation_config_result.h"
 

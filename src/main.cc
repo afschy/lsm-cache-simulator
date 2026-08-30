@@ -1,8 +1,10 @@
+#include <cstdlib>
 #include <iostream>
-#include "simulators.h"
-#include "lru_cache.h"
+#include <string>
 #include "lfu_cache.h"
+#include "lru_cache.h"
 #include "optimal_cache.h"
+#include "simulators.h"
 
 enum SimulationMode {
     kFilterOnly,

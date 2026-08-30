@@ -1,6 +1,10 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+#include "cache.h"
 // The percolate helpers only ever swap the mapped values of cache_map, so the
 // mapped type is a template parameter: any swappable value works.
 

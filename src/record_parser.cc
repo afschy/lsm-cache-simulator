@@ -1,7 +1,12 @@
 #include "record_parser.h"
+
 #include <charconv>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <vector>
 
 void split_string(std::vector<std::string_view>& output, std::string_view input, char delimiter) {
     output.clear();

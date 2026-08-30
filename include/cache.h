@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string>
 
 enum class BlockType: uint8_t {
     kFilter,

@@ -1,7 +1,10 @@
 #pragma once
-#include <queue>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
+#include <string>
 #include <unordered_map>
+#include <vector>
 #include "cache.h"
 
 class OptimalCache: public Cache {    

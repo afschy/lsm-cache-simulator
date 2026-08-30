@@ -1,8 +1,11 @@
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <iostream>
-#include <map>
-#include "optimal_cache.h"
+#include <utility>
 #include "heap_utils.h"
+#include "optimal_cache.h"
 
 void OptimalCache::add_lookahead(CacheBlock block) {
     lookahead_counter_++;

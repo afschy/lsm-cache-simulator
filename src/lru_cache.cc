@@ -1,5 +1,5 @@
-#include <iostream>
 #include <cstdlib>
+#include <iostream>
 #include "lru_cache.h"
 
 void LRUCache::insert_block(CacheBlock block) {

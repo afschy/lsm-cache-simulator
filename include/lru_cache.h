@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <list>
+#include <string>
 #include <unordered_map>
 #include "cache.h"
 

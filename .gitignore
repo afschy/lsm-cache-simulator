@@ -75,3 +75,7 @@ Testing/
 # Build output (dir is tracked; contents are not)
 bin/*
 !bin/.gitkeep
+
+# Plot output (dir is tracked; contents are not)
+plots/*
+!plots/.gitkeep

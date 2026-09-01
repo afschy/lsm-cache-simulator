@@ -7,8 +7,8 @@ separated by blank lines:
     disk_reads,<workload>,<workload>,...
     <POLICY>,<value>,<value>,...
 
-Only the disk_reads block is plotted: one bar group per workload, one colored
-bar per policy.  With no policy names on the command line every policy in the
+Only the disk_reads block is plotted: the workloads run along the x axis and
+each policy is one colored line across them.  With no policy names on the command line every policy in the
 file is drawn; naming policies restricts the chart to those, keeping each one's
 color.  The chart is written to plots/<csv stem>_disk_reads.pdf.
 """
@@ -75,27 +75,25 @@ def select(series, names):
 
 
 def plot(workloads, series, policies, colors, title):
-    """Grouped bars: one group per workload, one bar per policy."""
-    span = 0.82                    # share of a group's slot covered by bars
-    width = span / len(policies)
-    offsets = [-span / 2 + width * (index + 0.5) for index in range(len(policies))]
+    """One line per policy across the workloads, marked at every workload."""
     positions = range(len(workloads))
 
-    figure, axes = plt.subplots(figsize=(max(7.0, 1.7 * len(workloads)), 5.0))
+    figure, axes = plt.subplots(figsize=(max(7.0, 1.4 * len(workloads)), 5.0))
     figure.patch.set_facecolor(SURFACE)
     axes.set_facecolor(SURFACE)
 
-    for policy, offset in zip(policies, offsets):
-        values = [0.0 if value is None else value for value in series[policy]]
-        axes.bar([position + offset for position in positions], values,
-                 width=width * 0.92,   # the remainder is the surface gap
-                 color=colors[policy], label=policy, linewidth=0)
+    for policy in policies:
+        values = [float("nan") if value is None else value for value in series[policy]]
+        axes.plot(list(positions), values, label=policy, color=colors[policy],
+                  linewidth=2.0, marker="o", markersize=5.5,
+                  markeredgecolor=SURFACE, markeredgewidth=1.0)
 
     axes.set_xticks(list(positions))
     axes.set_xticklabels(workloads)
     axes.set_ylabel(METRIC)
     axes.set_xlabel("workload")
-    axes.margins(x=0.02)
+    axes.margins(x=0.04)
+    axes.set_ylim(bottom=0)
 
     axes.set_axisbelow(True)
     axes.grid(axis="y", color=GRIDLINE, linewidth=0.8)
@@ -111,8 +109,8 @@ def plot(workloads, series, policies, colors, title):
     # Legend above the axes, outside the plotting area, with the title above it.
     columns = min(len(policies), 4)
     legend = axes.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02),
-                         ncol=columns, frameon=False, handlelength=1.1,
-                         handleheight=1.1, columnspacing=1.6)
+                         ncol=columns, frameon=False, handlelength=1.6,
+                         columnspacing=1.6)
     for text in legend.get_texts():
         text.set_color(INK_PRIMARY)
     axes.set_title(title, color=INK_PRIMARY, fontsize=12, pad=26 + 18 *

@@ -36,7 +36,7 @@ SimulationResult filter_simulate_normal(const char* trace_file_name, const Simul
         }
         if (curr_record.record_type == kFileDelete) {
             auto it = file_map.find(curr_record.file_id);
-            if (it != file_map.end()) release_file(cache, it->second, config);
+            if (it != file_map.end()) release_filters_of_file(cache, it->second, config);
             continue;
         }
 
@@ -320,7 +320,7 @@ SimulationResult filter_simulate_modular(const char* trace_file_name, const Simu
         if (curr_record.record_type == kFileDelete) {
             auto it = file_map.find(curr_record.file_id);
             if (it != file_map.end()) {
-                release_file(cache, it->second, config);
+                release_filters_of_file(cache, it->second, config);
                 it->second.deleted = true;
             }
 

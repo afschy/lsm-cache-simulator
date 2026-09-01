@@ -67,6 +67,15 @@ void HeapLFUCache::remove_block(CacheBlock block) {
     }
 }
 
+void HeapLFUCache::remove_file_blocks(const FileMetadata& file) {
+    std::vector<CacheBlock> matches;
+    for (size_t i = 1; i < cache_heap_.size(); i++)
+        if (cache_heap_[i].file_id_ == file.file_id)
+            matches.push_back(cache_heap_[i]);
+    for (const CacheBlock& block : matches)
+        remove_block(block);
+}
+
 void HeapLFUCache::evict_block() {
     if (cache_heap_.size() <= 1) return;
     remove_block(cache_heap_[1]);

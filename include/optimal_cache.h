@@ -26,9 +26,10 @@ public:
     using Cache::record_access;
     
     bool advance_lookahead();   // Returns true if hit, false if miss
-    bool block_exists(CacheBlock block) {return cache_map_.find(block.hash()) != cache_map_.end();}
+    bool block_exists(CacheBlock block) override {return cache_map_.find(block.hash()) != cache_map_.end();}
     void insert_block(CacheBlock block) override;   // might evict blocks to make space
     void remove_block(CacheBlock block) override;
+    virtual void remove_file_blocks(const FileMetadata& file) override;
     void evict_block() override;
     void record_access(CacheBlock block) override;  // has to be the first element of the lookahead, otherwise will crash
 
@@ -39,5 +40,5 @@ public:
     void pop_lookahead_front();
     void clear_lookahead() {lookahead_.clear();}
     size_t get_lookahead_size() {return lookahead_.size();}
-    std::string get_name(){return "OPTIMAL";}
+    std::string get_name() override {return "OPTIMAL";}
 };

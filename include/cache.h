@@ -1,4 +1,5 @@
 #pragma once
+#include "record_parser.h"
 #include <cstdint>
 #include <string>
 
@@ -68,6 +69,7 @@ public:
         remove_block(block);
     }
     virtual void evict_block()=0;                     // removes tail
+    virtual void remove_file_blocks(const FileMetadata& file)=0;
     virtual void record_access(CacheBlock block)=0;
     virtual void record_access(BlockType block_type, uint64_t file_id, uint64_t block_id) {
         CacheBlock block(block_type, file_id, block_id, 0, 0);

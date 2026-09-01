@@ -19,6 +19,7 @@ public:
     bool block_exists(CacheBlock block) {return cache_map_.find(block.hash()) != cache_map_.end();}
     void insert_block(CacheBlock block);    // might evict blocks to make space
     void remove_block(CacheBlock block);
+    void remove_file_blocks(const FileMetadata& file);
     void evict_block();                     // removes tail
     void record_access(CacheBlock block);
     std::string get_name() {

@@ -124,6 +124,15 @@ void OptimalCache::remove_block(CacheBlock block) {
         cache_map_[block_hash] = max_percolate_up(cache_map_, cache_heap_, pos, &CacheBlock::nearest_access_);
 }
 
+void OptimalCache::remove_file_blocks(const FileMetadata& file) {
+    std::vector<CacheBlock> matches;
+    for (size_t i = 1; i < cache_heap_.size(); i++)
+        if (cache_heap_[i].file_id_ == file.file_id)
+            matches.push_back(cache_heap_[i]);
+    for (const CacheBlock& block : matches)
+        remove_block(block);
+}
+
 void OptimalCache::evict_block() {
     if (cache_heap_.size() > 1)
         remove_block(cache_heap_[1]);

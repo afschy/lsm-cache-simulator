@@ -1,6 +1,8 @@
 #include <cstdlib>
 #include <iostream>
 #include "lru_cache.h"
+#include "cache.h"
+#include "record_parser.h"
 
 void LRUCache::insert_block(CacheBlock block) {
     if (block.size_ > max_size_) {
@@ -29,6 +31,19 @@ void LRUCache::remove_block(CacheBlock block) {
     block_count_--;
     lru_block_list_.erase(it);
     cache_map_.erase(block.hash());
+}
+
+void LRUCache::remove_file_blocks(const FileMetadata& file) {
+    for (auto it = lru_block_list_.begin(); it != lru_block_list_.end();) {
+        if (it->file_id_ != file.file_id) {
+            ++it;
+            continue;
+        }
+        curr_size_ -= it->size_;
+        block_count_--;
+        cache_map_.erase(it->hash());
+        it = lru_block_list_.erase(it);
+    }
 }
 
 void LRUCache::evict_block() {

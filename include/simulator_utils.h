@@ -21,7 +21,7 @@ inline void get_filter_blocks(std::vector<Block>& filter_block_list, const FileM
     }
 }
 
-inline void release_file(Cache* cache, const FileMetadata& file, const SimulationConfig& config) {
+inline void release_filters_of_file(Cache* cache, const FileMetadata& file, const SimulationConfig& config) {
     std::vector<Block> filter_blocks;
     get_filter_blocks(filter_blocks, file, config);
     for (const Block& b : filter_blocks)

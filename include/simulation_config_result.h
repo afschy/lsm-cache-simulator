@@ -43,7 +43,7 @@ struct SimulationConfig {
             auto result = std::from_chars(value.data(), value.data() + value.size(), number);
             if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) continue;
 
-            if (key == "mode") mode = static_cast<SimulationMode>(mode);
+            if (key == "mode") mode = static_cast<SimulationMode>(number);
             else if (key == "cache_size") { 
                 filter_cache_size = number;
                 data_cache_size = number;

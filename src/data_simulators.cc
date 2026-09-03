@@ -300,18 +300,22 @@ SimulationResult data_simulate_optimal_modular(const char* trace_file_name, cons
             if (module_count) bpk_per_module = 1.00 * config.bits_per_key / module_count; 
             else bpk_per_module = 0;
 
-            uint32_t higher_count = 0, lower_equal_count = 0, self_count = 0;
+            uint16_t used_modules;
             auto self_it = empty_access_map.find(curr_probe.file_id);
-            if (self_it != empty_access_map.end()) self_count = self_it->second;
-            for (const auto& it : empty_access_map) {
-                if (it.second > self_count) higher_count++;
-                else lower_equal_count++;
-            }
+            // a file that has never come up empty has nothing to filter for yet
+            if (self_it == empty_access_map.end()) used_modules = 0;
+            else {
+                uint32_t self_count = self_it->second;
+                uint32_t higher_count = 0, lower_equal_count = 0;
+                for (const auto& it : empty_access_map) {
+                    if (it.second > self_count) higher_count++;
+                    else lower_equal_count++;
+                }
 
-            uint16_t used_modules = static_cast<uint16_t>(round(1.00 * module_count * lower_equal_count / (higher_count + lower_equal_count)));
-            if (!self_count) used_modules = 0;
-            else used_modules = std::max(uint16_t(1), used_modules);
-            used_modules = std::min(used_modules, module_count);
+                // the file counts itself, so the denominator is at least 1
+                used_modules = static_cast<uint16_t>(round(1.00 * module_count * lower_equal_count / (higher_count + lower_equal_count)));
+                used_modules = std::min(std::max(uint16_t(1), used_modules), module_count);
+            }
 
             filter_block_list.resize(used_modules);
             for (const Block& filter_block: filter_block_list) {
@@ -375,7 +379,7 @@ SimulationResult data_simulate_optimal_modular(const char* trace_file_name, cons
     while (next_get_records.size()) update_lookahead();
     while (filter_cache->get_lookahead_size())
         consume_filter_lookahead();
-    while (data_cache->get_lookahead_size() > data_cache->get_max_lookahead())
+    while (data_cache->get_lookahead_size())
         consume_data_lookahead();
 
     std::string filter_name = filter_cache->get_name();
@@ -416,6 +420,7 @@ SimulationResult data_simulate_modular(const char* trace_file_name, const Simula
             auto it = file_map.find(curr_record.file_id);
             if (it != file_map.end()) {
                 release_filters_of_file(filter_cache, it->second, config);
+                data_cache->remove_file_blocks(it->second);
                 it->second.deleted = true;
             }
 

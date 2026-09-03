@@ -1,40 +1,20 @@
 #include <cstdlib>
 #include <iostream>
-#include <string>
 #include "lfu_cache.h"
 #include "lru_cache.h"
 #include "optimal_cache.h"
 #include "simulators.h"
 
-enum SimulationMode {
-    kFilterOnly,
-    kFilterData,
-};
-
 int main(int argc, char** argv) {
-    if (argc != 2 && argc != 3) {
-        std::cout<< "Usage: bin/lsm-sim filename 0/1[filter-only/dual]\n";
+    if (argc != 2) {
+        std::cout<< "Usage: bin/lsm-sim filename\n";
         exit(1);
     }
 
     SimulationConfig config;
     config.read_from_file("config");
 
-    SimulationMode mode = kFilterOnly;
-    if (argc == 3) {
-        int mode = std::stoi(argv[2]);
-        switch (mode)
-        {
-        case 1:
-            mode = kFilterData;
-            break;
-        default:
-            mode = kFilterOnly;
-            break;
-        }
-    }
-
-    if (mode == kFilterOnly) {
+    if (config.mode == kFilterOnly) {
         LRUCache lru(config.filter_cache_size);
         HeapLFUCache lfu(config.filter_cache_size, false);
         HeapLFUCache lfu_absolute(config.filter_cache_size, true);
@@ -71,7 +51,7 @@ int main(int argc, char** argv) {
         modular_optimal_res.generate_result_filename(config); modular_optimal_res.write_result();
     }
 
-    else if (mode == kFilterData) {
+    else if (config.mode == kFilterData) {
         LRUCache lru1(config.filter_cache_size), lru2(config.data_cache_size);
         HeapLFUCache lfu1(config.filter_cache_size, false), lfu2(config.data_cache_size, false);
         HeapLFUCache lfu_absolute1(config.filter_cache_size, true), lfu_absolute2(config.data_cache_size, true);

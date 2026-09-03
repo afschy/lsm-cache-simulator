@@ -9,7 +9,13 @@
 #include <system_error>
 #include <vector>
 
+enum SimulationMode: uint8_t{
+    kFilterOnly = 0,
+    kFilterData = 1,
+};
+
 struct SimulationConfig {
+    SimulationMode mode = kFilterOnly;
     uint64_t filter_cache_size = 512 << 10;
     uint64_t data_cache_size = 512 << 10;
     uint64_t default_block_size = 4096;
@@ -37,7 +43,8 @@ struct SimulationConfig {
             auto result = std::from_chars(value.data(), value.data() + value.size(), number);
             if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) continue;
 
-            if (key == "cache_size") { 
+            if (key == "mode") mode = static_cast<SimulationMode>(mode);
+            else if (key == "cache_size") { 
                 filter_cache_size = number;
                 data_cache_size = number;
             }
@@ -67,7 +74,15 @@ struct SimulationConfig {
 struct SimulationResult {
     uint32_t hit_count = 0;
     uint32_t miss_count = 0;
+
+    uint32_t filter_hit_count = 0;
+    uint32_t filter_miss_count = 0;
+
+    uint32_t data_hit_count = 0;
+    uint32_t data_miss_count = 0;
+
     uint32_t extra_read_count = 0;
+
     std::vector<uint32_t> hit_series;
     std::vector<uint32_t> miss_series;
     std::vector<uint32_t> extra_read_series;
@@ -84,8 +99,9 @@ struct SimulationResult {
 
     void generate_result_filename(const SimulationConfig& config) {
         result_filename = cache_policy_name
+                        + "_mode" + std::to_string(config.mode)
                         + "_fcs" + std::to_string(config.filter_cache_size)
-                        + "_dcs" + std::to_string(config.filter_cache_size)
+                        + "_dcs" + std::to_string(config.data_cache_size)
                         + "_bs" + std::to_string(config.default_block_size)
                         + "_sc" + std::to_string(config.shard_count)
                         + "_look" + std::to_string(config.optimal_lookahead)
@@ -97,11 +113,22 @@ struct SimulationResult {
 
     void write_result() {
         FILE* file = fopen(result_filename.c_str(), "w");
+
         fprintf(file, "total_count %u\n", hit_count+miss_count);
         fprintf(file, "hit_count %u\n", hit_count);
         fprintf(file, "miss_count %u\n", miss_count);
+
+        fprintf(file, "filter_count %u\n", filter_hit_count+filter_miss_count);
+        fprintf(file, "filter_hit_count %u\n", filter_hit_count);
+        fprintf(file, "filter_miss_count %u\n", filter_miss_count);
+
+        fprintf(file, "data_count %u\n", data_hit_count+data_miss_count);
+        fprintf(file, "data_hit_count %u\n", data_hit_count);
+        fprintf(file, "data_miss_count %u\n", data_miss_count);
+
         fprintf(file, "extra_read_count %u\n", extra_read_count);
         fprintf(file, "series_per_record %u\n", series_per_record);
+
         fprintf(file, "hit_series");
         for (uint32_t curr_hit : hit_series)
             fprintf(file, " %u", curr_hit);

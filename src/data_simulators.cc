@@ -227,7 +227,167 @@ SimulationResult data_simulate_optimal(const char* trace_file_name, const Simula
 }
 
 SimulationResult data_simulate_optimal_modular(const char* trace_file_name, const SimulationConfig& config, OptimalCache* filter_cache, OptimalCache* data_cache) {
+    RecordParser parser(trace_file_name);
+    SimulationResult result;
+    uint16_t curr_access = 0;
+    std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
+    std::unordered_map<uint64_t, uint64_t> empty_access_map;    // file_id to query miss count mapping in the current window
+    // key is <file_id,lookup_id>
+    // stores whether this block access resulted from a false-positive
+    std::map<std::pair<uint64_t, uint64_t>, bool> unnecessary_access_map;
+    uint64_t records_parsed = 0;
 
+    // consumes the oldest lookahead entry; the caller must ensure the lookahead isn't empty
+    auto consume_filter_lookahead = [&]() {
+        if (filter_cache->advance_lookahead()) {
+            result.hit_count++;
+            result.filter_hit_count++;
+        }
+        else {
+            result.miss_count++;
+            result.filter_miss_count++;
+        }
+
+        if (++curr_access == config.series_per_record) {
+            curr_access = 0;
+            result.push();
+        }
+    };
+
+    // consumes the oldest lookahead entry; the caller must ensure the lookahead isn't empty
+    auto consume_data_lookahead = [&]() {
+        CacheBlock lookahead_front = data_cache->lookahead_.front();
+        bool miss = false;
+
+        if (data_cache->advance_lookahead()) {
+            result.hit_count++;
+            result.data_hit_count++;
+        }
+        else {
+            result.miss_count++;
+            result.data_miss_count++;
+            miss = true;
+        }
+
+        if (++curr_access == config.series_per_record) {
+            curr_access = 0;
+            result.push();
+        }
+
+        std::pair<uint64_t, uint64_t> key_pair(lookahead_front.file_id_, lookahead_front.lookup_id_);
+        auto it = unnecessary_access_map.find(key_pair);
+        if (it == unnecessary_access_map.end()) return;
+        if (miss) result.extra_read_count++;
+    };
+
+    std::deque<Record> next_get_records;
+    uint64_t get_counter = 0;
+    Record curr_record;
+
+    auto update_lookahead = [&]() {
+        const Record& get_record = next_get_records.front();
+        for (const Probe& curr_probe: get_record.probes) {
+            if (file_map.find(curr_probe.file_id) == file_map.end()) {
+                std::cerr << "Error: inconsistent simulation state, never-created file_id accessed\n";
+                exit(1);
+            }
+
+            std::vector<Block> filter_block_list;
+            get_filter_blocks(filter_block_list, file_map[curr_probe.file_id], config);
+
+            uint16_t module_count = filter_block_list.size();
+            double bpk_per_module;
+            if (module_count) bpk_per_module = 1.00 * config.bits_per_key / module_count; 
+            else bpk_per_module = 0;
+
+            uint32_t higher_count = 0, lower_equal_count = 0, self_count = 0;
+            auto self_it = empty_access_map.find(curr_probe.file_id);
+            if (self_it != empty_access_map.end()) self_count = self_it->second;
+            for (const auto& it : empty_access_map) {
+                if (it.second > self_count) higher_count++;
+                else lower_equal_count++;
+            }
+
+            uint16_t used_modules = static_cast<uint16_t>(round(1.00 * module_count * lower_equal_count / (higher_count + lower_equal_count)));
+            if (!self_count) used_modules = 0;
+            else used_modules = std::max(uint16_t(1), used_modules);
+            used_modules = std::min(used_modules, module_count);
+
+            filter_block_list.resize(used_modules);
+            for (const Block& filter_block: filter_block_list) {
+                CacheBlock cache_block(BlockType::kFilter, curr_probe.file_id, filter_block.block_id, curr_probe.level, filter_block.uncomp_bytes, get_record.lookup_id);
+                filter_cache->add_lookahead(cache_block);
+            }
+
+            const FileOutcome outcome = curr_probe.file_outcome;
+            if (outcome == FileOutcome::kNotFound) {
+                // no need to read anything if the bloom filter says no
+                // if no bloom filters are used, default to yes
+                if (used_modules && !get_filter_false_positive(used_modules * bpk_per_module))
+                    continue;
+            }
+
+            std::pair<uint64_t, uint64_t> key_pair(curr_probe.file_id, get_record.lookup_id);
+            if (outcome == FileOutcome::kNotFound) unnecessary_access_map[key_pair] = true;
+
+            for (const Block& data_block: curr_probe.blocks) {
+                CacheBlock cache_block(BlockType::kData, curr_probe.file_id, data_block.block_id, curr_probe.level, data_block.uncomp_bytes, get_record.lookup_id);
+                data_cache->add_lookahead(cache_block);
+            }
+        }
+
+        for (const Probe& curr_probe: get_record.probes) {
+            if (curr_probe.file_outcome != FileOutcome::kNotFound) continue;
+            auto it = empty_access_map.find(curr_probe.file_id);
+            if (it != empty_access_map.end() && !--it->second) empty_access_map.erase(it);
+        }
+        next_get_records.pop_front();
+    };
+
+    while (parser.parse_next_record(&curr_record)) {
+        if ((++records_parsed & ((1<<20)-1)) == 0) std::cout << "parsed: " << records_parsed << std::endl;
+        bool is_get = false;
+        if (curr_record.record_type == kFileCreate) {
+            FileMetadata new_metadata(curr_record);
+            file_map[curr_record.file_id] = new_metadata;
+        }
+        else if (curr_record.record_type == kFileMove) {
+            if (file_map.find(curr_record.file_id) != file_map.end())
+                file_map[curr_record.file_id].level = curr_record.new_level;
+        }
+        else if (curr_record.record_type == kGet) {
+            is_get = true;
+            get_counter++;
+            next_get_records.push_back(curr_record);
+            for (const Probe& probe: curr_record.probes)
+                if (probe.file_outcome == FileOutcome::kNotFound) empty_access_map[probe.file_id]++;
+        }
+        if (!is_get || get_counter < config.modular_lookahead)
+            continue;
+
+        update_lookahead();
+        while (filter_cache->get_lookahead_size() > filter_cache->get_max_lookahead())
+            consume_filter_lookahead();
+        while (data_cache->get_lookahead_size() > data_cache->get_max_lookahead())
+            consume_data_lookahead();
+    }
+
+    while (next_get_records.size()) update_lookahead();
+    while (filter_cache->get_lookahead_size())
+        consume_filter_lookahead();
+    while (data_cache->get_lookahead_size() > data_cache->get_max_lookahead())
+        consume_data_lookahead();
+
+    std::string filter_name = filter_cache->get_name();
+    std::string data_name = data_cache->get_name();
+    if (filter_name == data_name)
+        result.cache_policy_name = filter_name;
+    else
+        result.cache_policy_name = filter_name + "_" + data_name;
+    result.cache_policy_name = "MODULAR_" + result.cache_policy_name;
+    if (curr_access) result.push();
+    std::cout << "parsed: " << records_parsed << std::endl;
+    return result;
 }
 
 SimulationResult data_simulate_modular(const char* trace_file_name, const SimulationConfig& config, Cache* filter_cache, Cache* data_cache) {

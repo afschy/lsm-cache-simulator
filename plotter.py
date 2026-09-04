@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot the disk_reads table of an aggregated .csv as a grouped bar chart.
+"""Plot metrics of an aggregated .csv as grouped line charts.
 
 The .csv written by logs/aggregate_results.py holds one block per metric,
 separated by blank lines:
@@ -7,10 +7,16 @@ separated by blank lines:
     disk_reads,<workload>,<workload>,...
     <POLICY>,<value>,<value>,...
 
-Only the disk_reads block is plotted: the workloads run along the x axis and
-each policy is one colored line across them.  With no policy names on the command line every policy in the
-file is drawn; naming policies restricts the chart to those, keeping each one's
-color.  The chart is written to plots/<csv stem>_disk_reads.pdf.
+One chart is drawn per metric: disk_reads and the miss counts straight from
+their blocks (miss_count, filter_miss_count, data_miss_count), plus the matching
+miss rates -- miss_rate from its block, and filter_miss_rate / data_miss_rate as
+the ratios filter_miss_count/filter_count and data_miss_count/data_count (the
+shared count scale cancels in the ratio).  In every chart the workloads run
+along the x axis and each policy is one colored line across them.  With no policy
+names on the command line every policy in the file is drawn; naming policies
+restricts the charts to those, keeping each one's color.  The charts are written
+to plots/<csv stem>/<metric>.pdf; a metric whose columns are blank (e.g. the
+filter/data metrics for a mode-0 set) is skipped.
 """
 
 import argparse
@@ -22,7 +28,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-METRIC = "disk_reads"
+# (name, source) per chart.  A "block" source is read straight from the .csv; a
+# "ratio" source divides the first block by the second, cell by cell.
+METRICS = [
+    ("disk_reads", ("block", "disk_reads")),
+    ("miss_count", ("block", "miss_count")),
+    ("miss_rate", ("block", "miss_rate")),
+    ("filter_miss_count", ("block", "filter_miss_count")),
+    ("filter_miss_rate", ("ratio", "filter_miss_count", "filter_count")),
+    ("data_miss_count", ("block", "data_miss_count")),
+    ("data_miss_rate", ("ratio", "data_miss_count", "data_count")),
+]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
 
@@ -38,23 +54,50 @@ GRIDLINE = "#e1e0d9"
 BASELINE = "#c3c2b7"
 
 
-def read_metric(path, metric):
-    """(workloads, {policy: [values]}) from the named block of the .csv."""
-    workloads, series = None, {}
+def read_blocks(path):
+    """{metric: (workloads, {policy: [values]})} for every block in the .csv."""
+    blocks, header = {}, None
     with path.open(newline="") as file:
         for row in csv.reader(file):
             if not row or not row[0]:
-                if workloads is not None:
-                    break          # blank line ends the block we came for
+                header = None          # blank line ends the current block
                 continue
-            if workloads is None:
-                if row[0] == metric:
-                    workloads = row[1:]
+            if header is None:
+                header, series = row[0], {}
+                blocks[header] = (row[1:], series)
                 continue
             series[row[0]] = [float(cell) if cell else None for cell in row[1:]]
-    if workloads is None:
-        raise KeyError(metric)
+    return blocks
+
+
+def metric_series(blocks, source):
+    """(workloads, {policy: [values]}) for one metric source, ratios computed."""
+    if source[0] == "block":
+        return blocks[source[1]]
+    (workloads, num), (_, den) = blocks[source[1]], blocks[source[2]]
+    series = {}
+    for policy, nums in num.items():
+        dens = den.get(policy, [])
+        series[policy] = [n / d if n is not None and d else None
+                          for n, d in zip(nums, dens)]
     return workloads, series
+
+
+def has_data(series, policies):
+    """True when at least one drawn policy has at least one value."""
+    return any(value is not None
+               for policy in policies for value in series[policy])
+
+
+def color_map(blocks):
+    """A stable color per policy, in the file's policy order across all blocks."""
+    policies = []
+    for _workloads, series in blocks.values():
+        for policy in series:
+            if policy not in policies:
+                policies.append(policy)
+    return {policy: SERIES_COLORS[index % len(SERIES_COLORS)]
+            for index, policy in enumerate(policies)}
 
 
 def select(series, names):
@@ -74,7 +117,7 @@ def select(series, names):
     return [policy for policy in series if policy in chosen]
 
 
-def plot(workloads, series, policies, colors, title):
+def plot(workloads, series, policies, colors, metric, title):
     """One line per policy across the workloads, marked at every workload."""
     positions = range(len(workloads))
 
@@ -90,7 +133,7 @@ def plot(workloads, series, policies, colors, title):
 
     axes.set_xticks(list(positions))
     axes.set_xticklabels(workloads)
-    axes.set_ylabel(METRIC)
+    axes.set_ylabel(metric)
     axes.set_xlabel("workload")
     axes.margins(x=0.04)
     axes.set_ylim(bottom=0)
@@ -126,41 +169,49 @@ def main():
     parser.add_argument("policies", nargs="*",
                         help="policies to draw (default: every policy in the file)")
     parser.add_argument("-o", "--output", type=Path,
-                        help="output file (default: plots/<csv stem>_%s.pdf)" % METRIC)
+                        help="output directory (default: plots/<csv stem>/)")
     args = parser.parse_args()
 
     try:
-        workloads, series = read_metric(args.csv, METRIC)
+        blocks = read_blocks(args.csv)
     except OSError as error:
         print(error, file=sys.stderr)
         return 1
-    except KeyError:
-        print(f"{args.csv}: no {METRIC} table", file=sys.stderr)
+
+    colors = color_map(blocks)
+    output_dir = args.output or OUTPUT_DIR / args.csv.stem
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    for metric, source in METRICS:
+        try:
+            workloads, series = metric_series(blocks, source)
+        except KeyError:
+            print(f"{args.csv}: no {metric} data", file=sys.stderr)
+            continue
+
+        try:
+            policies = select(series, args.policies)
+        except LookupError as error:
+            print(f"{args.csv}: unknown policies: {error}", file=sys.stderr)
+            print(f"available: {', '.join(series)}", file=sys.stderr)
+            return 1
+
+        if not workloads or not has_data(series, policies):
+            print(f"{args.csv}: {metric} is empty, skipped", file=sys.stderr)
+            continue
+
+        figure = plot(workloads, series, policies, colors, metric,
+                      f"{metric} - {args.csv.stem}")
+        output = output_dir / f"{metric}.pdf"
+        figure.savefig(output, facecolor=SURFACE)
+        plt.close(figure)
+        print(f"{output}: {len(policies)} policies, {len(workloads)} workloads")
+        written += 1
+
+    if not written:
+        print(f"{args.csv}: nothing to plot", file=sys.stderr)
         return 1
-
-    if not series or not workloads:
-        print(f"{args.csv}: {METRIC} table is empty", file=sys.stderr)
-        return 1
-
-    # Slots follow the file's full policy list, so filtering never repaints.
-    colors = {policy: SERIES_COLORS[index % len(SERIES_COLORS)]
-              for index, policy in enumerate(series)}
-
-    try:
-        policies = select(series, args.policies)
-    except LookupError as error:
-        print(f"{args.csv}: unknown policies: {error}", file=sys.stderr)
-        print(f"available: {', '.join(series)}", file=sys.stderr)
-        return 1
-
-    title = f"{METRIC} - {args.csv.stem}"
-    figure = plot(workloads, series, policies, colors, title)
-
-    output = args.output or OUTPUT_DIR / f"{args.csv.stem}_{METRIC}.pdf"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, facecolor=SURFACE)
-    plt.close(figure)
-    print(f"{output}: {len(policies)} policies, {len(workloads)} workloads")
     return 0
 
 

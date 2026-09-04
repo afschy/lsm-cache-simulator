@@ -36,13 +36,33 @@ METRICS = [
     ("miss_rate", _miss_rate, False),
     ("extra_read_count", lambda v: v.get("extra_read_count"), True),
     ("disk_reads", lambda v: _sum(v, "miss_count", "extra_read_count"), True),
+    # Mode-1 (data_) logs additionally split hits/misses across the filter and
+    # data caches; these are blank for mode-0 logs that never report them.
+    ("filter_count", lambda v: v.get("filter_count"), True),
+    ("filter_hit_count", lambda v: v.get("filter_hit_count"), True),
+    ("filter_miss_count", lambda v: v.get("filter_miss_count"), True),
+    ("data_count", lambda v: v.get("data_count"), True),
+    ("data_hit_count", lambda v: v.get("data_hit_count"), True),
+    ("data_miss_count", lambda v: v.get("data_miss_count"), True),
 ]
+
+def metrics_for(set_name):
+    """METRICS for one set; data_ sets sum disk_reads from the filter/data misses."""
+    if not set_name.startswith("data_"):
+        return METRICS
+    return [(label,
+             (lambda v: _sum(v, "filter_miss_count", "data_miss_count"))
+             if label == "disk_reads" else extract,
+             scaled)
+            for label, extract, scaled in METRICS]
+
 
 DEFAULT_SCALE = 1e8
 PRECISION = 4
 
-# POLICY_cs<...>_dbs<...>_..._bpk<...>.log -> POLICY
-POLICY_RE = re.compile(r"^(?P<policy>.+?)_cs\d+.*\.log$")
+# POLICY_cs<...>_..._bpk<...>.log            (mode 0) -> POLICY
+# POLICY_mode1_fcs<...>_dcs<...>_..._bpk<...>.log (mode 1) -> POLICY
+POLICY_RE = re.compile(r"^(?P<policy>.+?)_(?:mode\d+_fcs|cs)\d+.*\.log$")
 
 
 def natural_key(name):
@@ -162,7 +182,7 @@ def main():
 
         policies = sorted({p for t in traces.values() for p in t})
         tables = [(label, build_table(traces, policies, label, extract, scaled, args.scale))
-                  for label, extract, scaled in METRICS]
+                  for label, extract, scaled in metrics_for(set_dir.name)]
 
         write_markdown(args.root / f"{set_dir.name}.md", set_dir.name, tables, args.scale)
         write_csv(args.root / f"{set_dir.name}.csv", tables)

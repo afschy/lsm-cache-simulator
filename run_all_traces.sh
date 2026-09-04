@@ -24,12 +24,18 @@ cfg() { awk -v k="$1" '$1==k {print $2; found=1} END {if (!found) exit 1}' "$CON
 SUFFIX="_cs$(cfg cache_size)_dbs$(cfg default_block_size)_sc$(cfg shard_count)"
 SUFFIX+="_look$(cfg optimal_lookahead)_mlook$(cfg modular_lookahead)_bpk$(cfg bits_per_key).log"
 
+case "$(cfg mode)" in
+    0) PREFIX="filter_" ;;
+    1) PREFIX="data_" ;;
+    *) echo "error: unexpected mode '$(cfg mode)' in $CONFIG" >&2; exit 1 ;;
+esac
+
 run_trace() {
     local trace="$1"
     local set_name trace_name log_dir
     set_name="$(basename -- "$(dirname -- "$trace")")"
     trace_name="$(basename -- "$trace" .zst)"
-    log_dir="$ROOT/logs/$set_name/$trace_name"
+    log_dir="$ROOT/logs/$set_name/$PREFIX$trace_name"
 
     mkdir -p "$log_dir" || return 1
     cp -- "$CONFIG" "$log_dir/config" || return 1

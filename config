@@ -1,7 +1,7 @@
 mode 1
 module_limit_optimized 1
-filter_cache_size 524288
-data_cache_size 524288
+filter_cache_size 4194304
+data_cache_size 4194304
 default_block_size 4096
 shard_count 1
 bits_per_key 16

@@ -310,29 +310,37 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
             std::vector<Block> filter_block_list;
             get_filter_blocks(filter_block_list, file_map[curr_probe.file_id], config);
 
-            uint16_t module_count = filter_block_list.size();
-            double bpk_per_module;
-            if (module_count) bpk_per_module = 1.00 * config.bits_per_key / module_count; 
-            else bpk_per_module = 0;
+            uint16_t total_modules = filter_block_list.size();
+            uint16_t used_modules = 0;
+            uint16_t module_limit = total_modules;
 
-            uint16_t used_modules;
-            auto self_it = empty_access_map.find(curr_probe.file_id);
-            // a file that has never come up empty has nothing to filter for yet
-            if (self_it == empty_access_map.end()) used_modules = 0;
-            else {
-                uint32_t self_count = self_it->second;
-                uint32_t higher_count = 0, lower_equal_count = 0;
-                for (const auto& it : empty_access_map) {
-                    if (it.second > self_count) higher_count++;
-                    else lower_equal_count++;
+            if (config.module_limit_optimized) {
+                auto self_it = empty_access_map.find(curr_probe.file_id);
+                
+                // a file that has never come up empty has nothing to filter for yet
+                if (self_it == empty_access_map.end())
+                    module_limit = 0;
+
+                else {
+                    uint32_t self_count = self_it->second;
+                    uint32_t higher_count = 0, lower_equal_count = 0;
+                    for (const auto& it : empty_access_map) {
+                        if (it.second > self_count) higher_count++;
+                        else lower_equal_count++;
+                    }
+
+                    // the file counts itself, so the denominator is at least 1
+                    module_limit = static_cast<uint16_t>(round(1.00 * total_modules * lower_equal_count / (higher_count + lower_equal_count)));
+                    module_limit = std::min(std::max(uint16_t(1), module_limit), total_modules);
                 }
-
-                // the file counts itself, so the denominator is at least 1
-                used_modules = static_cast<uint16_t>(round(1.00 * module_count * lower_equal_count / (higher_count + lower_equal_count)));
-                used_modules = std::min(std::max(uint16_t(1), used_modules), module_count);
             }
 
+            auto outcome = curr_probe.file_outcome;
+            bool real_verdict = (outcome==FileOutcome::kFoundValue) || (outcome==FileOutcome::kFoundMergeOperand) || (outcome==FileOutcome::kFoundTombstone);
+            bool verdict = modular_filter_verdict(real_verdict, config.bits_per_key, total_modules, module_limit, used_modules);
+
             filter_block_list.resize(used_modules);
+
             for (const Block& filter_block: filter_block_list) {
                 CacheBlock cache_block(BlockType::kFilter, curr_probe.file_id, filter_block.block_id, curr_probe.level, filter_block.uncomp_bytes, get_record.lookup_id);
                 filter_cache->add_lookahead(cache_block);
@@ -340,18 +348,13 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
 
             // filter-only: no data blocks are simulated, just count the extra reads
             if (config.mode == SimulationMode::kFilterOnly) {
-                if (curr_probe.file_outcome == FileOutcome::kNotFound && (!used_modules || get_filter_false_positive(used_modules * bpk_per_module)))
+                if (outcome == FileOutcome::kNotFound && verdict == true)
                     result.extra_read_count += curr_probe.blocks.size();
                 continue;
             }
 
-            const FileOutcome outcome = curr_probe.file_outcome;
-            if (outcome == FileOutcome::kNotFound) {
-                // no need to read anything if the bloom filter says no
-                // if no bloom filters are used, default to yes
-                if (used_modules && !get_filter_false_positive(used_modules * bpk_per_module))
-                    continue;
-            }
+            if (outcome == FileOutcome::kNotFound && verdict == false)
+                continue;
 
             std::pair<uint64_t, uint64_t> key_pair(curr_probe.file_id, get_record.lookup_id);
             if (outcome == FileOutcome::kNotFound) unnecessary_access_map[key_pair] = true;
@@ -411,6 +414,7 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
     else
         result.cache_policy_name = filter_name + "_" + data_name;
     result.cache_policy_name = "MODULAR_" + result.cache_policy_name;
+    if (config.module_limit_optimized) result.cache_policy_name = "OPTIMIZED_" + result.cache_policy_name;
     if (curr_access) result.push();
     std::cout << "parsed: " << records_parsed << std::endl;
     return result;
@@ -463,31 +467,44 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
             FileMetadata& file_metadata = file_entry->second;
 
             get_filter_blocks(filter_blocks, file_metadata, config);
-            size_t module_count = filter_blocks.size(), used_modules;
+            uint16_t total_modules = filter_blocks.size();
+            uint16_t used_modules = 0;
+            uint16_t module_limit = total_modules;
 
-            auto own_entry = empty_access_map.find(file_id);
-            // a deleted file has no live access history to be ranked against, so read the whole filter
-            if (file_metadata.deleted) used_modules = module_count;
-            // a live file that has never come up empty has nothing to filter for yet
-            else if (own_entry == empty_access_map.end()) used_modules = 0;
-            else {
-                uint64_t own_empty_count = own_entry->second;
-                uint64_t less_than_equal = 0, above = 0;
-                for (const auto& it: empty_access_map) {
-                    if (it.second > own_empty_count) above++;
-                    else less_than_equal++;
+            if (config.module_limit_optimized) {
+                auto own_entry = empty_access_map.find(file_id);
+
+                // a deleted file has no live access history to be ranked against, so read the whole filter
+                if (file_metadata.deleted)
+                    module_limit = total_modules;
+
+                // a live file that has never come up empty has nothing to filter for yet
+                else if (own_entry == empty_access_map.end())
+                    module_limit = 0;
+
+                else {
+                    uint64_t own_empty_count = own_entry->second;
+                    uint64_t less_than_equal = 0, above = 0;
+                    for (const auto& it: empty_access_map) {
+                        if (it.second > own_empty_count) above++;
+                        else less_than_equal++;
+                    }
+
+                    // the file counts itself, so the denominator is at least 1
+                    module_limit = round(1.00 * total_modules * less_than_equal / (above + less_than_equal));
+                    // max before min, so that a file with no filter at all still lands on 0
+                    module_limit = std::min(std::max(module_limit, uint16_t(1)), total_modules);
                 }
-
-                // the file counts itself, so the denominator is at least 1
-                used_modules = round(1.00 * module_count * less_than_equal / (above + less_than_equal));
-                // max before min, so that a file with no filter at all still lands on 0
-                used_modules = std::min(std::max(used_modules, size_t(1)), module_count);
             }
-            filter_blocks.resize(used_modules);
 
             if (curr_probe.file_outcome == FileOutcome::kNotFound && !file_metadata.deleted)
                 empty_access_map[file_id]++;
+
+            auto outcome = curr_probe.file_outcome;
+            bool real_verdict = (outcome==FileOutcome::kFoundValue) || (outcome==FileOutcome::kFoundMergeOperand) || (outcome==FileOutcome::kFoundTombstone);
+            bool verdict = modular_filter_verdict(real_verdict, config.bits_per_key, total_modules, module_limit, used_modules);
             
+            filter_blocks.resize(used_modules);
             for (const Block& filter_block: filter_blocks) {
                 CacheBlock cache_block(BlockType::kFilter, file_id, filter_block.block_id, curr_probe.level, filter_block.uncomp_bytes, curr_record.lookup_id);
                 if (filter_cache->block_exists(cache_block)) {
@@ -510,17 +527,13 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
 
             // filter-only: no data blocks are simulated, just count the extra reads
             if (config.mode == SimulationMode::kFilterOnly) {
-                if (curr_probe.file_outcome == FileOutcome::kNotFound && (!used_modules || get_filter_false_positive(1.00 * config.bits_per_key * used_modules / module_count)))
+                if (curr_probe.file_outcome == FileOutcome::kNotFound && verdict == true)
                     result.extra_read_count += curr_probe.blocks.size();
                 continue;
             }
 
-            auto outcome = curr_probe.file_outcome;
-            if (outcome == FileOutcome::kNotFound) {
-                bool bloom_result = true;
-                if (used_modules) bloom_result = get_filter_false_positive(1.00 * config.bits_per_key * used_modules / module_count);
-                if (!bloom_result) continue;    // no false positive, no block read
-            }
+            if (outcome == FileOutcome::kNotFound && verdict == false)
+                continue;
             
             for (const Block& data_block : curr_probe.blocks) {
                 CacheBlock cache_block(BlockType::kData, curr_probe.file_id, data_block.block_id, curr_probe.level, data_block.uncomp_bytes, curr_record.lookup_id);
@@ -552,7 +565,9 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
     else
         result.cache_policy_name = filter_name + "_" + data_name;
     result.cache_policy_name = "MODULAR_" + result.cache_policy_name;
+    if (config.module_limit_optimized) result.cache_policy_name = "OPTIMIZED_" + result.cache_policy_name;
     if (curr_access) result.push();
     std::cout << "parsed: " << records_parsed << std::endl;
     return result;
 }
+

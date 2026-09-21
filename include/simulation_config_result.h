@@ -16,6 +16,7 @@ enum SimulationMode: uint8_t{
 
 struct SimulationConfig {
     SimulationMode mode = kFilterOnly;
+    uint8_t module_limit_optimized = 0;
     uint64_t filter_cache_size = 512 << 10;
     uint64_t data_cache_size = 512 << 10;
     uint64_t default_block_size = 4096;
@@ -44,6 +45,7 @@ struct SimulationConfig {
             if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) continue;
 
             if (key == "mode") mode = static_cast<SimulationMode>(number);
+            else if (key == "module_limit_optimized") module_limit_optimized = number;
             else if (key == "cache_size") { 
                 filter_cache_size = number;
                 data_cache_size = number;

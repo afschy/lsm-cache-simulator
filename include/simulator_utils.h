@@ -37,3 +37,26 @@ inline bool get_filter_false_positive(double bpk) {
     static std::uniform_real_distribution<double> distribution(0.0, 1.0);
     return distribution(generator) < std::exp(-ln2_squared * bpk);
 }
+
+// using modular filters with a total module count and bpk, returns the number of modules used and the verdict
+inline bool modular_filter_verdict(bool real_verdict, double total_bpk,
+                                       uint16_t total_modules, uint16_t module_limit,
+                                       uint16_t& used_modules) {
+    // if the actual verdict is true, the modular bf will use all modules and give find no negative value
+    // if module_limit is 0, default to true
+    if (real_verdict || module_limit==0) {
+        used_modules = module_limit;
+        return true;
+    }
+
+    double bpk_per_module = total_bpk / total_modules;
+    double verdict = true;
+    used_modules = 0;
+
+    while (verdict && used_modules < module_limit) {
+        used_modules++;
+        verdict = get_filter_false_positive(bpk_per_module);
+    }
+    return verdict;
+}
+

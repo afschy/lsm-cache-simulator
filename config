@@ -1,4 +1,5 @@
 mode 1
+module_limit_optimized 1
 filter_cache_size 524288
 data_cache_size 524288
 default_block_size 4096

@@ -71,6 +71,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+__pycache__/
 
 # Build output (dir is tracked; contents are not)
 bin/*

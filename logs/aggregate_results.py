@@ -3,11 +3,13 @@
 
 Layout expected under the root (default: this script's directory):
 
-    <root>/<set>/<trace>/<POLICY>_<config>.log
+    <root>/fcs<F>_dcs<D>_<set>/<trace>/<POLICY>_mode<M>_fcs<F>_dcs<D>_<...>.log
 
-For every <set> a table is emitted with one column per <trace> directory and
-one row per policy, repeated for each of the reported metrics.  Policies that a
-trace directory is missing are left blank.
+Each set directory is one (filter cache size, data cache size, trace set)
+cluster, written as <root>/fcs<F>_dcs<D>_<set>.{md,csv}.  A table is emitted
+with one column per <trace> directory and one row per policy, repeated for each
+of the reported metrics.  Policies that a trace directory is missing are left
+blank; logs whose fcs/dcs differ from their set directory's are skipped.
 """
 
 import argparse
@@ -60,9 +62,11 @@ def metrics_for(set_name):
 DEFAULT_SCALE = 1e8
 PRECISION = 4
 
-# POLICY_cs<...>_..._bpk<...>.log            (mode 0) -> POLICY
-# POLICY_mode1_fcs<...>_dcs<...>_..._bpk<...>.log (mode 1) -> POLICY
-POLICY_RE = re.compile(r"^(?P<policy>.+?)_(?:mode\d+_fcs|cs)\d+.*\.log$")
+# POLICY_mode<M>_fcs<F>_dcs<D>_..._bpk<...>.log -> POLICY, F, D
+POLICY_RE = re.compile(r"^(?P<policy>.+?)_mode\d+_(?P<sizes>fcs\d+_dcs\d+)_.*\.log$")
+
+# fcs<F>_dcs<D>_<set> -> fcs<F>_dcs<D>
+SET_RE = re.compile(r"^(?P<sizes>fcs\d+_dcs\d+)_.+$")
 
 
 def natural_key(name):
@@ -86,7 +90,7 @@ def parse_log(path):
     return values
 
 
-def collect(set_dir):
+def collect(set_dir, sizes):
     """{trace_name: {policy: metrics}} for every log-holding dir in set_dir."""
     traces = {}
     for trace_dir in sorted(set_dir.iterdir(), key=lambda p: natural_key(p.name)):
@@ -95,8 +99,13 @@ def collect(set_dir):
         policies = {}
         for log in sorted(trace_dir.glob("*.log")):
             match = POLICY_RE.match(log.name)
-            if match:
-                policies[match.group("policy")] = parse_log(log)
+            if not match:
+                continue
+            if match.group("sizes") != sizes:
+                print(f"skipping {log}: cache sizes differ from {set_dir.name}",
+                      file=sys.stderr)
+                continue
+            policies[match.group("policy")] = parse_log(log)
         if policies:
             traces[trace_dir.name] = policies
     return traces
@@ -175,7 +184,11 @@ def main():
         return 1
 
     for set_dir in set_dirs:
-        traces = collect(set_dir)
+        set_match = SET_RE.match(set_dir.name)
+        if not set_match:
+            print(f"skipping {set_dir.name}: not named fcs<F>_dcs<D>_<set>", file=sys.stderr)
+            continue
+        traces = collect(set_dir, set_match.group("sizes"))
         if not traces:
             print(f"skipping {set_dir.name}: no logs found", file=sys.stderr)
             continue

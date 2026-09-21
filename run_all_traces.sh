@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run bin/lsm-sim over every trace under traces/, writing results to
-# logs/<trace-set>/<trace-name>/<POLICY>_<config>.log
+# logs/fcs<filter-cache-size>_dcs<data-cache-size>_<trace-set>/<prefix><trace-name>/<POLICY>_<config>.log
 #
 # The simulator reads ./config and writes its .log files into the current
 # working directory, so each trace is run from inside its own log directory
@@ -21,12 +21,16 @@ JOBS="${JOBS:-8}"
 
 cfg() { awk -v k="$1" '$1==k {print $2; found=1} END {if (!found) exit 1}' "$CONFIG"; }
 
-SUFFIX="_cs$(cfg cache_size)_dbs$(cfg default_block_size)_sc$(cfg shard_count)"
+FCS="$(cfg filter_cache_size)" && DCS="$(cfg data_cache_size)" \
+    || { echo "error: filter_cache_size/data_cache_size missing from $CONFIG" >&2; exit 1; }
+CACHE_TAG="fcs${FCS}_dcs${DCS}"
+
+SUFFIX="_${CACHE_TAG}_dbs$(cfg default_block_size)_sc$(cfg shard_count)"
 SUFFIX+="_look$(cfg optimal_lookahead)_mlook$(cfg modular_lookahead)_bpk$(cfg bits_per_key).log"
 
 case "$(cfg mode)" in
     0) PREFIX="filter_" ;;
-    1) PREFIX="data_" ;;
+    1) PREFIX="filter_data_" ;;
     *) echo "error: unexpected mode '$(cfg mode)' in $CONFIG" >&2; exit 1 ;;
 esac
 
@@ -35,7 +39,7 @@ run_trace() {
     local set_name trace_name log_dir
     set_name="$(basename -- "$(dirname -- "$trace")")"
     trace_name="$(basename -- "$trace" .zst)"
-    log_dir="$ROOT/logs/$set_name/$PREFIX$trace_name"
+    log_dir="$ROOT/logs/${CACHE_TAG}_$set_name/$PREFIX$trace_name"
 
     mkdir -p "$log_dir" || return 1
     cp -- "$CONFIG" "$log_dir/config" || return 1
@@ -57,6 +61,18 @@ mapfile -t TRACES < <(find "$ROOT/traces" -type f -name '*.zst' | sort)
 (( ${#TRACES[@]} )) || { echo "error: no .zst traces found under $ROOT/traces" >&2; exit 1; }
 
 echo "${#TRACES[@]} trace(s), $JOBS job(s), suffix $SUFFIX"
+
+# Background jobs of a script ignore SIGINT, so Ctrl-C alone would leave the simulators
+# running. SIGTERM the whole process tree instead, collected before anything dies.
+descendants() { local c; for c in $(pgrep -P "$1"); do echo "$c"; descendants "$c"; done; }
+on_signal() {
+    trap - INT TERM
+    echo "interrupted; stopping running traces" >&2
+    kill -TERM $(descendants $$) 2>/dev/null
+    exit "$1"
+}
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # `wait -n` yields the exit status of whichever job finished, so every simulator
 # failure is counted here rather than being swallowed by a bare `wait`.

@@ -13,7 +13,7 @@ miss rates -- miss_rate from its block, and filter_miss_rate / data_miss_rate as
 the ratios filter_miss_count/filter_count and data_miss_count/data_count (the
 shared count scale cancels in the ratio).  In every chart the workloads run
 along the x axis and each policy is one line across them.  Policies are split
-into a base and a variant prefix (OPTIMIZED_MODULAR_LRU -> LRU, OPTIMIZED_MODULAR_):
+into a base and a variant prefix (FILEINFO_MODULAR_LRU -> LRU, FILEINFO_MODULAR_):
 the base picks the hue and marker, the variant the shade and dash, so no two
 policies share a color.  With no policy names on the command line every policy
 in the file is drawn; naming policies restricts the charts to those, keeping each
@@ -60,6 +60,11 @@ FAMILY_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "h"]
 # One OKLCH lightness and dash per variant, darkest/solid for the base policy.
 VARIANT_LIGHTNESS = (0.48, 0.78)
 VARIANT_DASHES = ["solid", (0, (5, 2)), (0, (1, 1.5)), (0, (6, 2, 1, 2))]
+# Fixed dash per policy-name prefix, overriding the variant dash.
+PREFIX_DASHES = {"VANILLA_MODULAR_": (0, (4, 1.5, 1, 1.5)),
+                 "COSTMODEL_MODULAR_": "solid",
+                 "FILEINFO_MODULAR_": (0, (5, 2)),
+                 "WORKINFO_MODULAR_": (0, (1, 1.5))}
 
 SURFACE = "#fcfcfb"
 INK_PRIMARY = "#0b0b0b"
@@ -161,7 +166,11 @@ def oklch_to_hex(lightness, chroma, hue):
 
 
 def split_policy(policy, names):
-    """(base, variant prefix); the base is the shortest name the policy ends with."""
+    """(base, variant prefix); a PREFIX_DASHES prefix is split off directly,
+    otherwise the base is the shortest name the policy ends with."""
+    for prefix in PREFIX_DASHES:
+        if policy.startswith(prefix):
+            return policy[len(prefix):], prefix
     base = min((name for name in names
                 if policy == name or policy.endswith("_" + name)), key=len)
     return base, policy[:len(policy) - len(base)]
@@ -180,8 +189,10 @@ def style_map(blocks):
 
     splits = {policy: split_policy(policy, policies) for policy in policies}
     families = list(dict.fromkeys(base for base, _ in splits.values()))
+    prefix_order = list(PREFIX_DASHES)
     variants = sorted({variant for _, variant in splits.values()},
-                      key=lambda v: (len(v), v))
+                      key=lambda v: (prefix_order.index(v) if v in PREFIX_DASHES
+                                     else len(prefix_order), len(v), v))
 
     family_hues = []
     for index in range(len(families)):
@@ -200,10 +211,14 @@ def style_map(blocks):
     for policy, (base, variant) in splits.items():
         f, v = families.index(base), variants.index(variant)
         hue = family_hues[f]
-        color = (FAMILY_COLORS[f] if len(variants) == 1 and f < len(FAMILY_COLORS)
-                 else oklch_to_hex(shades[v], hue[1], hue[2]))
-        styles[policy] = (f, v, color, FAMILY_MARKERS[f % len(FAMILY_MARKERS)],
-                          VARIANT_DASHES[v % len(VARIANT_DASHES)])
+        if variant in PREFIX_DASHES:   # same color for a family across prefixes
+            color = FAMILY_COLORS[f] if f < len(FAMILY_COLORS) else oklch_to_hex(*hue)
+        else:
+            color = (FAMILY_COLORS[f] if len(variants) == 1 and f < len(FAMILY_COLORS)
+                     else oklch_to_hex(shades[v], hue[1], hue[2]))
+        dash = next((d for prefix, d in PREFIX_DASHES.items()
+                     if policy.startswith(prefix)), VARIANT_DASHES[v % len(VARIANT_DASHES)])
+        styles[policy] = (f, v, color, FAMILY_MARKERS[f % len(FAMILY_MARKERS)], dash)
     return styles
 
 

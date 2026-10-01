@@ -1,10 +1,12 @@
 mode 1
 module_limit_optimized 1
-filter_cache_size 4194304
+filter_cache_size 4194304 
 data_cache_size 4194304
 default_block_size 4096
-shard_count 1
 bits_per_key 16
 optimal_lookahead 10000
 modular_lookahead 10000
 series_per_record 10000
+mbf_partial_threshold 0.1
+mbf_full_threshold 0.2
+workload_empty_fraction 0.2

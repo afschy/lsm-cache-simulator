@@ -42,7 +42,16 @@ run_trace() {
     log_dir="$ROOT/logs/${CACHE_TAG}_$set_name/$PREFIX$trace_name"
 
     mkdir -p "$log_dir" || return 1
-    cp -- "$CONFIG" "$log_dir/config" || return 1
+    # An ep<x> suffix overrides workload_empty_fraction with x/100 in this trace's config copy.
+    # Always written with a decimal point: the simulator ignores integer-looking values for it.
+    if [[ "$trace_name" =~ (^|_)ep([0-9]+)$ ]]; then
+        local pct=$((10#${BASH_REMATCH[2]})) frac
+        frac="$(printf '%d.%02d' $((pct / 100)) $((pct % 100)))"
+        awk -v f="$frac" '$1=="workload_empty_fraction" {next} {print} END {print "workload_empty_fraction", f}' \
+            "$CONFIG" > "$log_dir/config" || return 1
+    else
+        cp -- "$CONFIG" "$log_dir/config" || return 1
+    fi
 
     echo "[run ] $set_name/$trace_name"
     local start=$SECONDS status=0

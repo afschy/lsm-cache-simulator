@@ -38,8 +38,8 @@ METRICS = [
     ("miss_rate", _miss_rate, False),
     ("extra_read_count", lambda v: v.get("extra_read_count"), True),
     ("disk_reads", lambda v: _sum(v, "miss_count", "extra_read_count"), True),
-    # Mode-1 (data_) logs additionally split hits/misses across the filter and
-    # data caches; these are blank for mode-0 logs that never report them.
+    # Mode-1 (filter_data_) logs additionally split hits/misses across the filter
+    # and data caches; these are blank for mode-0 logs that never report them.
     ("filter_count", lambda v: v.get("filter_count"), True),
     ("filter_hit_count", lambda v: v.get("filter_hit_count"), True),
     ("filter_miss_count", lambda v: v.get("filter_miss_count"), True),
@@ -48,15 +48,11 @@ METRICS = [
     ("data_miss_count", lambda v: v.get("data_miss_count"), True),
 ]
 
-def metrics_for(set_name):
-    """METRICS for one set; data_ sets sum disk_reads from the filter/data misses."""
-    if not set_name.startswith("data_"):
-        return METRICS
-    return [(label,
-             (lambda v: _sum(v, "filter_miss_count", "data_miss_count"))
-             if label == "disk_reads" else extract,
-             scaled)
-            for label, extract, scaled in METRICS]
+def extractor_for(label, extract, trace_name):
+    """filter_data_ traces sum disk_reads from the filter/data misses."""
+    if label == "disk_reads" and trace_name.startswith("filter_data_"):
+        return lambda v: _sum(v, "filter_miss_count", "data_miss_count")
+    return extract
 
 
 DEFAULT_SCALE = 1e8
@@ -126,7 +122,8 @@ def build_table(traces, policies, label, extract, scaled, scale):
     trace_names = list(traces)
     rows = [[label] + trace_names]
     for policy in policies:
-        rows.append([policy] + [cell(traces[t].get(policy), extract, scaled, scale)
+        rows.append([policy] + [cell(traces[t].get(policy), extractor_for(label, extract, t),
+                                     scaled, scale)
                                 for t in trace_names])
     return rows
 
@@ -195,7 +192,7 @@ def main():
 
         policies = sorted({p for t in traces.values() for p in t})
         tables = [(label, build_table(traces, policies, label, extract, scaled, args.scale))
-                  for label, extract, scaled in metrics_for(set_dir.name)]
+                  for label, extract, scaled in METRICS]
 
         write_markdown(args.root / f"{set_dir.name}.md", set_dir.name, tables, args.scale)
         write_csv(args.root / f"{set_dir.name}.csv", tables)

@@ -14,9 +14,16 @@ enum SimulationMode: uint8_t{
     kFilterData = 1,
 };
 
+enum ModuleOptimizationLevel: uint8_t{
+    kVanilla = 0,
+    kCostModel = 1,
+    kFileInfo = 2,
+    kWorkInfo = 3,
+};
+
 struct SimulationConfig {
-    SimulationMode mode = kFilterOnly;
-    uint8_t module_limit_optimized = 0;
+    SimulationMode mode = kFilterData;
+    ModuleOptimizationLevel module_limit_optimized = kVanilla;
     uint64_t filter_cache_size = 512 << 10;
     uint64_t data_cache_size = 512 << 10;
     uint64_t default_block_size = 4096;
@@ -26,6 +33,9 @@ struct SimulationConfig {
     uint16_t modular_lookahead = 100;
     uint32_t series_per_record = 10000;
     uint32_t filter_keys_per_block = default_block_size * 8 / bits_per_key;
+    double mbf_partial_threshold = 0.1;
+    double mbf_full_threshold = 0.2;
+    double workload_empty_fraction = 0.2;
 
     void read_from_file(const char* filename) {
         std::ifstream config_file(filename);
@@ -42,10 +52,23 @@ struct SimulationConfig {
 
             uint64_t number = 0;
             auto result = std::from_chars(value.data(), value.data() + value.size(), number);
-            if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) continue;
+            if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) {
+                double dnumber = 0;
+                auto dresult = std::from_chars(value.data(), value.data() + value.size(), dnumber);
+                if (dresult.ec != std::errc{} || dresult.ptr != value.data() + value.size()) continue;
+
+                if (key == "mbf_partial_threshold") mbf_partial_threshold = dnumber;
+                else if (key == "mbf_full_threshold") mbf_full_threshold = dnumber;
+                else if (key == "workload_empty_fraction") workload_empty_fraction = dnumber;
+                continue;
+            }
 
             if (key == "mode") mode = static_cast<SimulationMode>(number);
-            else if (key == "module_limit_optimized") module_limit_optimized = number;
+            else if (key == "module_limit_optimized") {
+                if (number >= kCostModel && number <= kWorkInfo)
+                    module_limit_optimized = static_cast<ModuleOptimizationLevel>(number);
+                else module_limit_optimized = kVanilla;
+            }
             else if (key == "cache_size") { 
                 filter_cache_size = number;
                 data_cache_size = number;

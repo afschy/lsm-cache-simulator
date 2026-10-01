@@ -247,6 +247,7 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
     uint16_t curr_access = 0;
     std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
     std::unordered_map<uint64_t, uint64_t> empty_access_map;    // file_id to query miss count mapping in the current window
+    std::unordered_map<uint64_t, uint64_t> total_access_map;    // file_id to probe count mapping in the current window
     // key is <file_id,lookup_id>
     // stores whether this block access resulted from a false-positive
     std::map<std::pair<uint64_t, uint64_t>, bool> unnecessary_access_map;
@@ -314,25 +315,19 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
             uint16_t used_modules = 0;
             uint16_t module_limit = total_modules;
 
-            if (config.module_limit_optimized) {
-                auto self_it = empty_access_map.find(curr_probe.file_id);
-                
-                // a file that has never come up empty has nothing to filter for yet
-                if (self_it == empty_access_map.end())
-                    module_limit = 0;
-
-                else {
-                    uint32_t self_count = self_it->second;
-                    uint32_t higher_count = 0, lower_equal_count = 0;
-                    for (const auto& it : empty_access_map) {
-                        if (it.second > self_count) higher_count++;
-                        else lower_equal_count++;
-                    }
-
-                    // the file counts itself, so the denominator is at least 1
-                    module_limit = static_cast<uint16_t>(round(1.00 * total_modules * lower_equal_count / (higher_count + lower_equal_count)));
-                    module_limit = std::min(std::max(uint16_t(1), module_limit), total_modules);
-                }
+            switch (config.module_limit_optimized) {
+                case kCostModel:
+                    module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_map, empty_access_map, next_get_records.size());
+                    break;
+                case kFileInfo:
+                    module_limit = get_optimized_module_count_pattern(config, total_modules, curr_probe, empty_access_map);
+                    break;
+                case kWorkInfo:
+                    module_limit = get_basic_module_count(config.workload_empty_fraction, curr_probe.level, total_modules);
+                    break;
+                case kVanilla:
+                default:
+                    break;
             }
 
             auto outcome = curr_probe.file_outcome;
@@ -366,6 +361,8 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
         }
 
         for (const Probe& curr_probe: get_record.probes) {
+            auto total_it = total_access_map.find(curr_probe.file_id);
+            if (total_it != total_access_map.end() && !--total_it->second) total_access_map.erase(total_it);
             if (curr_probe.file_outcome != FileOutcome::kNotFound) continue;
             auto it = empty_access_map.find(curr_probe.file_id);
             if (it != empty_access_map.end() && !--it->second) empty_access_map.erase(it);
@@ -388,8 +385,10 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
             is_get = true;
             get_counter++;
             next_get_records.push_back(curr_record);
-            for (const Probe& probe: curr_record.probes)
+            for (const Probe& probe: curr_record.probes) {
+                total_access_map[probe.file_id]++;
                 if (probe.file_outcome == FileOutcome::kNotFound) empty_access_map[probe.file_id]++;
+            }
         }
         if (!is_get || get_counter < config.modular_lookahead)
             continue;
@@ -414,7 +413,13 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
     else
         result.cache_policy_name = filter_name + "_" + data_name;
     result.cache_policy_name = "MODULAR_" + result.cache_policy_name;
-    if (config.module_limit_optimized) result.cache_policy_name = "OPTIMIZED_" + result.cache_policy_name;
+    switch (config.module_limit_optimized) {
+        case kCostModel: result.cache_policy_name = "COSTMODEL_" + result.cache_policy_name; break;
+        case kFileInfo: result.cache_policy_name = "FILEINFO_" + result.cache_policy_name; break;
+        case kWorkInfo: result.cache_policy_name = "WORKINFO_" + result.cache_policy_name; break;
+        case kVanilla: result.cache_policy_name = "VANILLA_" + result.cache_policy_name; break;
+        default: break;
+    }
     if (curr_access) result.push();
     std::cout << "parsed: " << records_parsed << std::endl;
     return result;
@@ -426,7 +431,9 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
     uint16_t curr_access = 0;
     std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
     std::unordered_map<uint64_t, uint64_t> empty_access_map;    // file_id to empty access count map
+    std::unordered_map<uint64_t, uint64_t> total_access_map;    // file_id to probe count map
     uint64_t records_parsed = 0;
+    uint64_t lookup_count = 0;  // completed get lookups
 
     Record curr_record;
     while (parser.parse_next_record(&curr_record)) {
@@ -434,6 +441,7 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
         if (curr_record.record_type == kIterator) continue;
         if (curr_record.record_type == kFileCreate) {
             FileMetadata new_metadata(curr_record);
+            new_metadata.creation_lookup = lookup_count;
             file_map[curr_record.file_id] = new_metadata;
             continue;
         }
@@ -451,6 +459,7 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
             }
 
             empty_access_map.erase(curr_record.file_id);
+            total_access_map.erase(curr_record.file_id);
             continue;
         }
 
@@ -471,32 +480,22 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
             uint16_t used_modules = 0;
             uint16_t module_limit = total_modules;
 
-            if (config.module_limit_optimized) {
-                auto own_entry = empty_access_map.find(file_id);
-
-                // a deleted file has no live access history to be ranked against, so read the whole filter
-                if (file_metadata.deleted)
-                    module_limit = total_modules;
-
-                // a live file that has never come up empty has nothing to filter for yet
-                else if (own_entry == empty_access_map.end())
-                    module_limit = 0;
-
-                else {
-                    uint64_t own_empty_count = own_entry->second;
-                    uint64_t less_than_equal = 0, above = 0;
-                    for (const auto& it: empty_access_map) {
-                        if (it.second > own_empty_count) above++;
-                        else less_than_equal++;
-                    }
-
-                    // the file counts itself, so the denominator is at least 1
-                    module_limit = round(1.00 * total_modules * less_than_equal / (above + less_than_equal));
-                    // max before min, so that a file with no filter at all still lands on 0
-                    module_limit = std::min(std::max(module_limit, uint16_t(1)), total_modules);
-                }
+            switch (config.module_limit_optimized) {
+                case kCostModel:
+                    module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_map, empty_access_map, lookup_count - file_metadata.creation_lookup, file_metadata.deleted);
+                    break;
+                case kFileInfo:
+                    module_limit = get_optimized_module_count_pattern(config, total_modules, curr_probe, empty_access_map, file_metadata.deleted);
+                    break;
+                case kWorkInfo:
+                    module_limit = get_basic_module_count(config.workload_empty_fraction, curr_probe.level, total_modules);
+                    break;
+                case kVanilla:
+                default:
+                    break;
             }
 
+            if (!file_metadata.deleted) total_access_map[file_id]++;
             if (curr_probe.file_outcome == FileOutcome::kNotFound && !file_metadata.deleted)
                 empty_access_map[file_id]++;
 
@@ -556,6 +555,7 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
                 }
             }
         }
+        if (curr_record.record_type == kGet) lookup_count++;
     }
 
     std::string filter_name = filter_cache->get_name();
@@ -565,7 +565,13 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
     else
         result.cache_policy_name = filter_name + "_" + data_name;
     result.cache_policy_name = "MODULAR_" + result.cache_policy_name;
-    if (config.module_limit_optimized) result.cache_policy_name = "OPTIMIZED_" + result.cache_policy_name;
+    switch (config.module_limit_optimized) {
+        case kCostModel: result.cache_policy_name = "COSTMODEL_" + result.cache_policy_name; break;
+        case kFileInfo: result.cache_policy_name = "FILEINFO_" + result.cache_policy_name; break;
+        case kWorkInfo: result.cache_policy_name = "WORKINFO_" + result.cache_policy_name; break;
+        case kVanilla: result.cache_policy_name = "VANILLA_" + result.cache_policy_name; break;
+        default: break;
+    }
     if (curr_access) result.push();
     std::cout << "parsed: " << records_parsed << std::endl;
     return result;

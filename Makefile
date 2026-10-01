@@ -1,6 +1,7 @@
 # lsm-cache-simulator
 
 TARGET   := lsm-sim
+ANALYZER := analyze_trace
 SRC_DIR  := src
 INC_DIR  := include
 BUILD_DIR := build
@@ -25,10 +26,13 @@ LDLIBS   := -lzstd
 SRCS := $(wildcard $(SRC_DIR)/*.cc)
 OBJS := $(patsubst $(SRC_DIR)/%.cc,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
+# Each binary has its own main(), so the analyzer stays out of the simulator's objects.
+SIM_OBJS      := $(filter-out $(BUILD_DIR)/$(ANALYZER).o,$(OBJS))
+ANALYZER_OBJS := $(addprefix $(BUILD_DIR)/,$(ANALYZER).o record_parser.o zstd_reader.o)
 
 .PHONY: all debug clean run
 
-all: $(BIN_DIR)/$(TARGET)
+all: $(BIN_DIR)/$(TARGET) $(BIN_DIR)/$(ANALYZER)
 
 # Recursive rather than `debug: clean all`, which races under -j: clean can delete
 # objects while all is compiling them.
@@ -36,7 +40,10 @@ debug:
 	$(MAKE) clean
 	$(MAKE) OPT="-O0 -g $(SAN)" LDFLAGS="$(LDFLAGS) $(SAN)"
 
-$(BIN_DIR)/$(TARGET): $(OBJS) | $(BIN_DIR)
+$(BIN_DIR)/$(TARGET): $(SIM_OBJS) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BIN_DIR)/$(ANALYZER): $(ANALYZER_OBJS) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cc | $(BUILD_DIR)
@@ -50,6 +57,6 @@ run: all
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f $(BIN_DIR)/$(TARGET)
+	rm -f $(BIN_DIR)/$(TARGET) $(BIN_DIR)/$(ANALYZER)
 
 -include $(DEPS)

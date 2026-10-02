@@ -71,6 +71,9 @@ struct Record {
 
     bool no_insert = false;
 
+    std::string smallest_key;
+    std::string largest_key;
+
     void reset();
 };
 
@@ -81,6 +84,8 @@ struct FileMetadata {
     uint32_t file_size;
     bool deleted = false;
     uint64_t creation_lookup = 0;   // lookups completed before the file was created
+    std::string smallest_key;
+    std::string largest_key;
 
     FileMetadata(){};
     FileMetadata(const Record& record) {parse_from_record(record);}

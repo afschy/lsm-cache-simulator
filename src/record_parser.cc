@@ -191,8 +191,12 @@ bool RecordParser::parse_file_event(Record* out_record, const std::string& read_
     out_record->entry_count = string_view_to_number(fields[6], success);
     out_record->file_size = string_view_to_number(fields[7], success);
     out_record->level = string_view_to_number(fields[8], success);
-    if (fields.size() > 9)
+    if (fields[3] == "move" && fields.size() > 9)
         out_record->new_level = string_view_to_number(fields[9], success);
+    if (fields[3] == "create" && fields.size() > 10) {
+        out_record->smallest_key = fields[9];
+        out_record->largest_key = fields[10];
+    }
     if (!success) return false;
 
     if (fields[3] == "create") out_record->record_type = kFileCreate;
@@ -207,4 +211,6 @@ void FileMetadata::parse_from_record(const Record& record) {
     level = record.level;
     entry_count = record.entry_count;
     file_size = record.file_size;
+    smallest_key = record.smallest_key;
+    largest_key = record.largest_key;
 }

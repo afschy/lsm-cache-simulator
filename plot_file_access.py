@@ -2,11 +2,11 @@
 """Plot per-file access counts from a bin/analyze_trace .csv.
 
 Writes <csv stem>_total.pdf and <csv stem>_empty.pdf to the current directory.
-Files run along the x axis in the .csv's order (level, then file ID), and a
-dashed vertical line separates consecutive levels.  On a linear axis the y
-range is capped at twice the tallest bar outside level 0 (rounded up to a nice
-number), so level 0 doesn't flatten the rest; clipped bars stop at the cap,
-whose tick reads "<cap>+".  --skip x drops levels 0 through x; the plots then
+Files run along the x axis in the .csv's order (level, then smallest key, then
+largest key), and a dashed vertical line separates consecutive levels.  On a
+linear axis the y range is capped at twice the tallest bar outside level 0
+(rounded up to a nice number), so level 0 doesn't flatten the rest; clipped
+bars stop at the cap, whose tick reads "<cap>+".  --skip x drops levels 0 through x; the plots then
 get a _skip<x> suffix.
 """
 
@@ -86,7 +86,7 @@ def plot(levels, counts, title, ylabel, out_path, log_scale):
         ax.set_ylim(0, cap)
         ax.set_yticks(ticks)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}" + ("+" if v >= cap else "")))
-    ax.set_xlabel("SST file (sorted by level, then file ID)", color=INK)
+    ax.set_xlabel("SST file (sorted by level, then smallest key, then largest key)", color=INK)
     ax.set_ylabel(ylabel, color=INK)
     ax.set_title(title, color=INK, pad=28)
     ax.grid(axis="y", color=GRID, linewidth=0.8)

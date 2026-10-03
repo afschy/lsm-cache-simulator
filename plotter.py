@@ -13,11 +13,12 @@ miss rates -- miss_rate from its block, and filter_miss_rate / data_miss_rate as
 the ratios filter_miss_count/filter_count and data_miss_count/data_count (the
 shared count scale cancels in the ratio).  In every chart the workloads run
 along the x axis and each policy is one line across them.  Policies are split
-into a base and a variant prefix (FILEINFO_MODULAR_LRU -> LRU, FILEINFO_MODULAR_):
-the base picks the hue and marker, the variant the shade and dash, so no two
-policies share a color.  With no policy names on the command line every policy
-in the file is drawn; naming policies restricts the charts to those, keeping each
-one's style.  Workloads are grouped by trace name, the word before the first
+into a base and a variant prefix (FILEINFO_RATIO_MODULAR_LRU -> LRU, FILEINFO_RATIO_MODULAR_):
+the base picks the color and marker, and the drawn variants get line styles in
+the order they are named, most distinct first.  With no policy names on the
+command line every policy in the file is drawn, in file order; naming policies
+(or prefixes such as VANILLA_MODULAR_) restricts the charts to those.
+Workloads are grouped by trace name, the word before the first
 underscore once the runner's mode prefix is dropped (filter_data_uniform_ep0 ->
 uniform), and each group is written to plots/<csv stem>/<trace name>/<metric>.pdf;
 a metric whose columns are blank (e.g. the filter/data metrics for a mode-0 set)
@@ -57,14 +58,11 @@ MODE_PREFIXES = ("filter_data_", "filter_")
 FAMILY_COLORS = ["#2a78d6", "#eda100", "#e87ba4", "#008300",
                  "#eb6834", "#4a3aa7", "#1baf7a", "#e34948"]
 FAMILY_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "h"]
-# One OKLCH lightness and dash per variant, darkest/solid for the base policy.
-VARIANT_LIGHTNESS = (0.48, 0.78)
-VARIANT_DASHES = ["solid", (0, (5, 2)), (0, (1, 1.5)), (0, (6, 2, 1, 2))]
-# Fixed dash per policy-name prefix, overriding the variant dash.
-PREFIX_DASHES = {"VANILLA_MODULAR_": (0, (4, 1.5, 1, 1.5)),
-                 "COSTMODEL_MODULAR_": "solid",
-                 "FILEINFO_MODULAR_": (0, (5, 2)),
-                 "WORKINFO_MODULAR_": (0, (1, 1.5))}
+# Line styles handed to the drawn variants in order, most mutually distinct
+# first; they repeat past the end.
+DASHES = ["solid", (0, (5, 2)), (0, (1, 1.5)), (0, (4, 1.5, 1, 1.5)),
+          (0, (10, 3)), (0, (3, 1, 1, 1, 1, 1)), (0, (1, 3.5)),
+          (0, (10, 2, 3, 2))]
 
 SURFACE = "#fcfcfb"
 INK_PRIMARY = "#0b0b0b"
@@ -130,23 +128,8 @@ def has_data(series, policies):
                for policy in policies for value in series[policy])
 
 
-def _to_linear(c):
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-
 def _to_srgb(c):
     return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
-
-
-def hex_to_oklch(color):
-    r, g, b = (_to_linear(int(color[i:i + 2], 16) / 255) for i in (1, 3, 5))
-    l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
-    m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
-    s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)
-    a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
-    b = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
-    return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
-            math.hypot(a, b), math.atan2(b, a))
 
 
 def oklch_to_hex(lightness, chroma, hue):
@@ -166,21 +149,21 @@ def oklch_to_hex(lightness, chroma, hue):
 
 
 def split_policy(policy, names):
-    """(base, variant prefix); a PREFIX_DASHES prefix is split off directly,
+    """(base, variant prefix); the prefix runs through the last "MODULAR_",
     otherwise the base is the shortest name the policy ends with."""
-    for prefix in PREFIX_DASHES:
-        if policy.startswith(prefix):
-            return policy[len(prefix):], prefix
+    head, sep, base = policy.rpartition("MODULAR_")
+    if sep and base:
+        return base, head + sep
     base = min((name for name in names
                 if policy == name or policy.endswith("_" + name)), key=len)
     return base, policy[:len(policy) - len(base)]
 
 
-def style_map(blocks):
-    """{policy: (family, variant, color, marker, dash)}, stable across subsets.
+def style_map(blocks, drawn):
+    """{policy: (family, variant, color, marker, dash)} for the drawn policies.
 
-    Families and variants are indexed over every policy in the file, so a
-    policy's style never depends on which others are drawn."""
+    Families are indexed over every policy in the file, so color and marker never
+    depend on which others are drawn; dashes go to the drawn variants in order."""
     policies = []
     for _workloads, series in blocks.values():
         for policy in series:
@@ -189,54 +172,37 @@ def style_map(blocks):
 
     splits = {policy: split_policy(policy, policies) for policy in policies}
     families = list(dict.fromkeys(base for base, _ in splits.values()))
-    prefix_order = list(PREFIX_DASHES)
-    variants = sorted({variant for _, variant in splits.values()},
-                      key=lambda v: (prefix_order.index(v) if v in PREFIX_DASHES
-                                     else len(prefix_order), len(v), v))
-
-    family_hues = []
-    for index in range(len(families)):
-        if index < len(FAMILY_COLORS):
-            family_hues.append(hex_to_oklch(FAMILY_COLORS[index]))
-        else:   # golden-angle steps keep generated hues apart
-            family_hues.append((0.63, 0.14, math.radians(20 + 137.5 * index)))
-
-    low, high = VARIANT_LIGHTNESS
-    if len(variants) > 3:
-        low, high = 0.36, 0.84
-    shades = [low + (high - low) * i / max(len(variants) - 1, 1)
-              for i in range(len(variants))]
+    variants = list(dict.fromkeys(splits[policy][1] for policy in drawn))
 
     styles = {}
-    for policy, (base, variant) in splits.items():
+    for policy in drawn:
+        base, variant = splits[policy]
         f, v = families.index(base), variants.index(variant)
-        hue = family_hues[f]
-        if variant in PREFIX_DASHES:   # same color for a family across prefixes
-            color = FAMILY_COLORS[f] if f < len(FAMILY_COLORS) else oklch_to_hex(*hue)
-        else:
-            color = (FAMILY_COLORS[f] if len(variants) == 1 and f < len(FAMILY_COLORS)
-                     else oklch_to_hex(shades[v], hue[1], hue[2]))
-        dash = next((d for prefix, d in PREFIX_DASHES.items()
-                     if policy.startswith(prefix)), VARIANT_DASHES[v % len(VARIANT_DASHES)])
-        styles[policy] = (f, v, color, FAMILY_MARKERS[f % len(FAMILY_MARKERS)], dash)
+        color = (FAMILY_COLORS[f] if f < len(FAMILY_COLORS)   # else golden-angle hues
+                 else oklch_to_hex(0.63, 0.14, math.radians(20 + 137.5 * f)))
+        styles[policy] = (f, v, color, FAMILY_MARKERS[f % len(FAMILY_MARKERS)],
+                          DASHES[v % len(DASHES)])
     return styles
 
 
 def select(series, names):
-    """The requested policies in file order, matched case-insensitively."""
+    """The requested policies in the order named, matched case-insensitively.
+
+    A name matching no policy exactly selects every policy it prefixes."""
     if not names:
         return list(series)
     lookup = {policy.lower(): policy for policy in series}
-    chosen, unknown = set(), []
+    chosen, unknown = {}, []
     for name in names:
-        policy = lookup.get(name.lower())
-        if policy is None:
+        key = name.lower()
+        matches = ([lookup[key]] if key in lookup else
+                   [policy for low, policy in lookup.items() if low.startswith(key)])
+        if not matches:
             unknown.append(name)
-        else:
-            chosen.add(policy)
+        chosen.update(dict.fromkeys(matches))
     if unknown:
         raise LookupError(", ".join(unknown))
-    return [policy for policy in series if policy in chosen]
+    return list(chosen)
 
 
 def legend_grid(policies, styles):
@@ -310,7 +276,8 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("csv", type=Path, help="aggregated .csv to plot")
     parser.add_argument("policies", nargs="*",
-                        help="policies to draw (default: every policy in the file)")
+                        help="policies or policy-name prefixes to draw "
+                             "(default: every policy in the file)")
     parser.add_argument("-o", "--output", type=Path,
                         help="output directory, one subdirectory per trace name "
                              "(default: plots/<csv stem>/)")
@@ -322,7 +289,6 @@ def main():
         print(error, file=sys.stderr)
         return 1
 
-    styles = style_map(blocks)
     output_dir = args.output or OUTPUT_DIR / args.csv.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -340,6 +306,7 @@ def main():
             print(f"{args.csv}: unknown policies: {error}", file=sys.stderr)
             print(f"available: {', '.join(series)}", file=sys.stderr)
             return 1
+        styles = style_map(blocks, policies)
 
         for name, (trace_workloads, trace_series) in group_by_trace(workloads,
                                                                     series).items():

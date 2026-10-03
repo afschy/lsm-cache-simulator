@@ -17,8 +17,9 @@ enum SimulationMode: uint8_t{
 enum ModuleOptimizationLevel: uint8_t{
     kVanilla = 0,
     kCostModel = 1,
-    kFileInfo = 2,
-    kWorkInfo = 3,
+    kFileInfoPercentile = 2,
+    kFileInfoRatio = 3,
+    kWorkInfo = 4,
 };
 
 struct SimulationConfig {

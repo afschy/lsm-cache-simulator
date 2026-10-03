@@ -322,11 +322,19 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
                 case kCostModel:
                     module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_map, empty_access_map, next_get_records.size());
                     break;
-                case kFileInfo:
-                    module_limit = get_optimized_module_count_pattern(total_modules, curr_probe, empty_access_map);
+                case kFileInfoPercentile:
+                    module_limit = get_module_count_file_percentile(total_modules, curr_probe, empty_access_map);
                     break;
+                case kFileInfoRatio: {
+                    double empty_fraction = 0.0;
+                    (levelwise_total_count.size() > curr_probe.level && levelwise_total_count[curr_probe.level])?
+                        empty_fraction = 1.00 * levelwise_empty_count[curr_probe.level] / levelwise_total_count[curr_probe.level]
+                    :empty_fraction = 0.0;
+                    module_limit = get_module_count_file_ratio(empty_fraction, total_modules, curr_probe, total_access_map, empty_access_map);
+                    break;
+                }
                 case kWorkInfo:
-                    module_limit = get_basic_module_count(config.workload_empty_fraction, curr_probe.level, total_modules);
+                    module_limit = get_module_count_workload_ratio(config.workload_empty_fraction, curr_probe.level, total_modules);
                     break;
                 case kVanilla:
                 default:
@@ -428,7 +436,8 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
     result.cache_policy_name = "MODULAR_" + result.cache_policy_name;
     switch (config.module_limit_optimized) {
         case kCostModel: result.cache_policy_name = "COSTMODEL_" + result.cache_policy_name; break;
-        case kFileInfo: result.cache_policy_name = "FILEINFO_" + result.cache_policy_name; break;
+        case kFileInfoPercentile: result.cache_policy_name = "FILEINFO_PERCENTILE_" + result.cache_policy_name; break;
+        case kFileInfoRatio: result.cache_policy_name = "FILEINFO_RATIO_" + result.cache_policy_name; break;
         case kWorkInfo: result.cache_policy_name = "WORKINFO_" + result.cache_policy_name; break;
         case kVanilla: result.cache_policy_name = "VANILLA_" + result.cache_policy_name; break;
         default: break;
@@ -500,15 +509,23 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
                 case kCostModel:
                     module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_map, empty_access_map, lookup_count - file_metadata.creation_lookup, file_metadata.deleted);
                     break;
-                case kFileInfo:
-                    module_limit = get_optimized_module_count_pattern(total_modules, curr_probe, empty_access_map, file_metadata.deleted);
+                case kFileInfoPercentile:
+                    module_limit = get_module_count_file_percentile(total_modules, curr_probe, empty_access_map, file_metadata.deleted);
                     break;
+                case kFileInfoRatio: {
+                    double empty_fraction = 0.0;
+                    (levelwise_total_count.size() > curr_probe.level && levelwise_total_count[curr_probe.level])?
+                        empty_fraction = 1.00 * levelwise_empty_count[curr_probe.level] / levelwise_total_count[curr_probe.level]
+                    :empty_fraction = 0.0;
+                    module_limit = get_module_count_file_ratio(empty_fraction, total_modules, curr_probe, total_access_map, empty_access_map);
+                    break;
+                }
                 case kWorkInfo: {
                     double empty_fraction = 0.0;
                     (levelwise_total_count.size() > curr_probe.level && levelwise_total_count[curr_probe.level])?
                         empty_fraction = 1.00 * levelwise_empty_count[curr_probe.level] / levelwise_total_count[curr_probe.level]
                     :empty_fraction = 0.0;
-                    module_limit = get_basic_module_count(empty_fraction, curr_probe.level, total_modules);
+                    module_limit = get_module_count_workload_ratio(empty_fraction, curr_probe.level, total_modules);
                     break;
                 }
                 case kVanilla:
@@ -597,7 +614,8 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
     result.cache_policy_name = "MODULAR_" + result.cache_policy_name;
     switch (config.module_limit_optimized) {
         case kCostModel: result.cache_policy_name = "COSTMODEL_" + result.cache_policy_name; break;
-        case kFileInfo: result.cache_policy_name = "FILEINFO_" + result.cache_policy_name; break;
+        case kFileInfoPercentile: result.cache_policy_name = "FILEINFO_PERCENTILE_" + result.cache_policy_name; break;
+        case kFileInfoRatio: result.cache_policy_name = "FILEINFO_RATIO_" + result.cache_policy_name; break;
         case kWorkInfo: result.cache_policy_name = "WORKINFO_" + result.cache_policy_name; break;
         case kVanilla: result.cache_policy_name = "VANILLA_" + result.cache_policy_name; break;
         default: break;

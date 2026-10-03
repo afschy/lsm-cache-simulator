@@ -106,7 +106,7 @@ inline uint16_t get_utility_based_module_count(
 }
 
 // for optimized modular policies, calculates the amount of modules to use based on access pattern
-inline uint16_t get_optimized_module_count_pattern(
+inline uint16_t get_module_count_file_percentile(
         const uint16_t& total_modules, 
         const Probe& curr_probe, 
         const std::unordered_map<uint64_t, uint64_t>& empty_access_map,
@@ -133,13 +133,61 @@ inline uint16_t get_optimized_module_count_pattern(
 
     // the file counts itself, so the denominator is at least 1
     module_limit = static_cast<uint16_t>(round(1.00 * total_modules * lower_equal_count / (higher_count + lower_equal_count)));
-    module_limit = std::min(std::max(uint16_t(1), module_limit), total_modules);
+    module_limit = std::min(module_limit, total_modules);
 
     return module_limit;
 }
 
+inline uint16_t get_module_count_file_ratio(
+        const double& empty_fraction,
+        const uint16_t& total_modules, 
+        const Probe& curr_probe, 
+        const std::unordered_map<uint64_t, uint64_t>& total_access_map,
+        const std::unordered_map<uint64_t, uint64_t>& empty_access_map,
+        bool deleted_file=false) {
+
+    if (deleted_file) 
+        return total_modules;
+
+    auto total_it = total_access_map.find(curr_probe.file_id);
+    auto empty_it = empty_access_map.find(curr_probe.file_id);
+
+    if (total_it == total_access_map.end() || empty_it == empty_access_map.end())
+        return 0;
+
+    uint64_t total_count = total_it->second, empty_count = empty_it->second;
+    if (total_count == 0) return 0;
+
+    double adjusted_ratio = 1.00 * empty_count * empty_count / total_count;
+
+    uint32_t higher_count = 0;
+    uint32_t lower_equal_count = 0;
+    for (auto total_it: total_access_map) {
+        total_count = total_it.second;
+        if (total_count == 0) {
+            lower_equal_count++;
+            continue;
+        }
+
+        empty_count = 0;
+        auto empty_it = empty_access_map.find(total_it.first);
+        if (empty_it != empty_access_map.end()) empty_count = empty_it->second;
+
+        double curr_ratio = 1.00 * empty_count * empty_count / total_count;
+        if (curr_ratio > adjusted_ratio) higher_count++;
+        else lower_equal_count++;
+    }
+
+
+    uint16_t module_limit = static_cast<uint16_t>(round(1.00 * total_modules * lower_equal_count / (higher_count + lower_equal_count)));
+    module_limit = std::min(module_limit, total_modules);
+
+    module_limit = empty_fraction * module_limit;
+    return module_limit;
+}
+
 // for optimized modular policies, calculates the amoung of modules based on workload empty query percentage
-inline uint16_t get_basic_module_count(
+inline uint16_t get_module_count_workload_ratio(
         const double& empty_fraction,
         const uint8_t& level,
         const uint16_t& total_modules, 
@@ -149,11 +197,11 @@ inline uint16_t get_basic_module_count(
         return total_modules;
     if (deleted_file)
         return total_modules;
-    if (level > 1)
-        return ceil(empty_fraction * total_modules);
+    // if (level > 1)
+    return ceil(empty_fraction * total_modules);
 
-    uint16_t used_modules = ceil(2.0 * empty_fraction * total_modules);
-    used_modules = std::min(total_modules, used_modules);
-    return used_modules;
+    // uint16_t used_modules = ceil(2.0 * empty_fraction * total_modules);
+    // used_modules = std::min(total_modules, used_modules);
+    // return used_modules;
 }
 

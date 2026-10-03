@@ -107,7 +107,6 @@ inline uint16_t get_utility_based_module_count(
 
 // for optimized modular policies, calculates the amount of modules to use based on access pattern
 inline uint16_t get_optimized_module_count_pattern(
-        const SimulationConfig& config,
         const uint16_t& total_modules, 
         const Probe& curr_probe, 
         const std::unordered_map<uint64_t, uint64_t>& empty_access_map,

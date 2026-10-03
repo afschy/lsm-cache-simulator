@@ -245,13 +245,16 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
     RecordParser parser(trace_file_name);
     SimulationResult result;
     uint16_t curr_access = 0;
+
     std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
     std::unordered_map<uint64_t, uint64_t> empty_access_map;    // file_id to query miss count mapping in the current window
     std::unordered_map<uint64_t, uint64_t> total_access_map;    // file_id to probe count mapping in the current window
     // key is <file_id,lookup_id>
     // stores whether this block access resulted from a false-positive
     std::map<std::pair<uint64_t, uint64_t>, bool> unnecessary_access_map;
+
     uint64_t records_parsed = 0;
+    std::vector<uint64_t> levelwise_total_count, levelwise_empty_count;
 
     // consumes the oldest lookahead entry; the caller must ensure the lookahead isn't empty
     auto consume_filter_lookahead = [&]() {
@@ -320,7 +323,7 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
                     module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_map, empty_access_map, next_get_records.size());
                     break;
                 case kFileInfo:
-                    module_limit = get_optimized_module_count_pattern(config, total_modules, curr_probe, empty_access_map);
+                    module_limit = get_optimized_module_count_pattern(total_modules, curr_probe, empty_access_map);
                     break;
                 case kWorkInfo:
                     module_limit = get_basic_module_count(config.workload_empty_fraction, curr_probe.level, total_modules);
@@ -363,9 +366,11 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
         for (const Probe& curr_probe: get_record.probes) {
             auto total_it = total_access_map.find(curr_probe.file_id);
             if (total_it != total_access_map.end() && !--total_it->second) total_access_map.erase(total_it);
+            levelwise_total_count[curr_probe.level]--;
             if (curr_probe.file_outcome != FileOutcome::kNotFound) continue;
             auto it = empty_access_map.find(curr_probe.file_id);
             if (it != empty_access_map.end() && !--it->second) empty_access_map.erase(it);
+            levelwise_empty_count[curr_probe.level]--;
         }
         next_get_records.pop_front();
     };
@@ -386,8 +391,16 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
             get_counter++;
             next_get_records.push_back(curr_record);
             for (const Probe& probe: curr_record.probes) {
+                if (levelwise_total_count.size() <= probe.level) {
+                    levelwise_total_count.resize(probe.level+1);
+                    levelwise_empty_count.resize(probe.level+1);
+                }
                 total_access_map[probe.file_id]++;
-                if (probe.file_outcome == FileOutcome::kNotFound) empty_access_map[probe.file_id]++;
+                levelwise_total_count[probe.level]++;
+                if (probe.file_outcome == FileOutcome::kNotFound) {
+                    empty_access_map[probe.file_id]++;
+                    levelwise_empty_count[probe.level]++;
+                }
             }
         }
         if (!is_get || get_counter < config.modular_lookahead)
@@ -429,11 +442,14 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
     RecordParser parser(trace_file_name);
     SimulationResult result;
     uint16_t curr_access = 0;
+
     std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
     std::unordered_map<uint64_t, uint64_t> empty_access_map;    // file_id to empty access count map
     std::unordered_map<uint64_t, uint64_t> total_access_map;    // file_id to probe count map
+
     uint64_t records_parsed = 0;
     uint64_t lookup_count = 0;  // completed get lookups
+    std::vector<uint64_t> levelwise_total_count, levelwise_empty_count;
 
     Record curr_record;
     while (parser.parse_next_record(&curr_record)) {
@@ -485,19 +501,33 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
                     module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_map, empty_access_map, lookup_count - file_metadata.creation_lookup, file_metadata.deleted);
                     break;
                 case kFileInfo:
-                    module_limit = get_optimized_module_count_pattern(config, total_modules, curr_probe, empty_access_map, file_metadata.deleted);
+                    module_limit = get_optimized_module_count_pattern(total_modules, curr_probe, empty_access_map, file_metadata.deleted);
                     break;
-                case kWorkInfo:
-                    module_limit = get_basic_module_count(config.workload_empty_fraction, curr_probe.level, total_modules);
+                case kWorkInfo: {
+                    double empty_fraction = 0.0;
+                    (levelwise_total_count.size() > curr_probe.level && levelwise_total_count[curr_probe.level])?
+                        empty_fraction = 1.00 * levelwise_empty_count[curr_probe.level] / levelwise_total_count[curr_probe.level]
+                    :empty_fraction = 0.0;
+                    module_limit = get_basic_module_count(empty_fraction, curr_probe.level, total_modules);
                     break;
+                }
                 case kVanilla:
                 default:
                     break;
             }
 
-            if (!file_metadata.deleted) total_access_map[file_id]++;
-            if (curr_probe.file_outcome == FileOutcome::kNotFound && !file_metadata.deleted)
+            if (levelwise_total_count.size() <= curr_probe.level) {
+                levelwise_total_count.resize(curr_probe.level+1);
+                levelwise_empty_count.resize(curr_probe.level+1);
+            }
+            if (!file_metadata.deleted) {
+                total_access_map[file_id]++;
+                levelwise_total_count[curr_probe.level]++;
+            }
+            if (curr_probe.file_outcome == FileOutcome::kNotFound && !file_metadata.deleted) {
                 empty_access_map[file_id]++;
+                levelwise_empty_count[curr_probe.level]++;
+            }
 
             auto outcome = curr_probe.file_outcome;
             bool real_verdict = (outcome==FileOutcome::kFoundValue) || (outcome==FileOutcome::kFoundMergeOperand) || (outcome==FileOutcome::kFoundTombstone);

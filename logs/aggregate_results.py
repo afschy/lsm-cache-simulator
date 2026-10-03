@@ -10,6 +10,7 @@ cluster, written as <root>/fcs<F>_dcs<D>_<set>.{md,csv}.  A table is emitted
 with one column per <trace> directory and one row per policy, repeated for each
 of the reported metrics.  Policies that a trace directory is missing are left
 blank; logs whose fcs/dcs differ from their set directory's are skipped.
+The .csv opens with a "scale,<divisor>" row, then a blank line, then the tables.
 """
 
 import argparse
@@ -152,12 +153,12 @@ def write_markdown(path, set_name, tables, scale):
     path.write_text("\n".join(lines))
 
 
-def write_csv(path, tables):
+def write_csv(path, tables, scale):
     with path.open("w", newline="") as file:
         writer = csv.writer(file)
-        for index, (_, rows) in enumerate(tables):
-            if index:
-                writer.writerow([])
+        writer.writerow(["scale", f"{scale:.17g}"])
+        for _, rows in tables:
+            writer.writerow([])
             writer.writerows(rows)
 
 
@@ -195,7 +196,7 @@ def main():
                   for label, extract, scaled in METRICS]
 
         write_markdown(args.root / f"{set_dir.name}.md", set_dir.name, tables, args.scale)
-        write_csv(args.root / f"{set_dir.name}.csv", tables)
+        write_csv(args.root / f"{set_dir.name}.csv", tables, args.scale)
         print(f"{set_dir.name}: {len(traces)} directories, {len(policies)} policies")
     return 0
 

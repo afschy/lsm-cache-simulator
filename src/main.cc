@@ -16,10 +16,10 @@ int main(int argc, char** argv) {
     config.read_from_file("config");
 
     // for normal bloom filter
-    // LRUCache lru1(config.filter_cache_size), lru2(config.data_cache_size);
-    // HeapLFUCache lfu1(config.filter_cache_size, false), lfu2(config.data_cache_size, false);
-    // HeapLFUCache lfu_absolute1(config.filter_cache_size, true), lfu_absolute2(config.data_cache_size, true);
-    // OptimalCache optimal1(config.filter_cache_size, config.optimal_lookahead), optimal2(config.data_cache_size, config.optimal_lookahead);
+    LRUCache lru1(config.filter_cache_size), lru2(config.data_cache_size);
+    HeapLFUCache lfu1(config.filter_cache_size, false), lfu2(config.data_cache_size, false);
+    HeapLFUCache lfu_absolute1(config.filter_cache_size, true), lfu_absolute2(config.data_cache_size, true);
+    OptimalCache optimal1(config.filter_cache_size, config.optimal_lookahead), optimal2(config.data_cache_size, config.optimal_lookahead);
 
     // vanilla modular bloom filter (no module count optimization)
     LRUCache vanilla_modular_lru1(config.filter_cache_size), vanilla_modular_lru2(config.data_cache_size);
@@ -33,11 +33,17 @@ int main(int argc, char** argv) {
     HeapLFUCache costmodel_modular_lfuabs1(config.filter_cache_size, true), costmodel_modular_lfuabs2(config.data_cache_size, true);
     OptimalCache costmodel_modular_optimal1(config.filter_cache_size, config.optimal_lookahead), costmodel_modular_optimal2(config.data_cache_size, config.optimal_lookahead);
 
-    // file-info modular bloom filter
-    LRUCache fileinfo_modular_lru1(config.filter_cache_size), fileinfo_modular_lru2(config.data_cache_size);
-    HeapLFUCache fileinfo_modular_lfu1(config.filter_cache_size, false), fileinfo_modular_lfu2(config.data_cache_size, false);
-    HeapLFUCache fileinfo_modular_lfuabs1(config.filter_cache_size, true), fileinfo_modular_lfuabs2(config.data_cache_size, true);
-    OptimalCache fileinfo_modular_optimal1(config.filter_cache_size, config.optimal_lookahead), fileinfo_modular_optimal2(config.data_cache_size, config.optimal_lookahead);
+    // file-info percentile modular bloom filter
+    LRUCache fileinfo_percentile_modular_lru1(config.filter_cache_size), fileinfo_percentile_modular_lru2(config.data_cache_size);
+    HeapLFUCache fileinfo_percentile_modular_lfu1(config.filter_cache_size, false), fileinfo_percentile_modular_lfu2(config.data_cache_size, false);
+    HeapLFUCache fileinfo_percentile_modular_lfuabs1(config.filter_cache_size, true), fileinfo_percentile_modular_lfuabs2(config.data_cache_size, true);
+    OptimalCache fileinfo_percentile_modular_optimal1(config.filter_cache_size, config.optimal_lookahead), fileinfo_percentile_modular_optimal2(config.data_cache_size, config.optimal_lookahead);
+
+    // file-info ratio modular bloom filter
+    LRUCache fileinfo_ratio_modular_lru1(config.filter_cache_size), fileinfo_ratio_modular_lru2(config.data_cache_size);
+    HeapLFUCache fileinfo_ratio_modular_lfu1(config.filter_cache_size, false), fileinfo_ratio_modular_lfu2(config.data_cache_size, false);
+    HeapLFUCache fileinfo_ratio_modular_lfuabs1(config.filter_cache_size, true), fileinfo_ratio_modular_lfuabs2(config.data_cache_size, true);
+    OptimalCache fileinfo_ratio_modular_optimal1(config.filter_cache_size, config.optimal_lookahead), fileinfo_ratio_modular_optimal2(config.data_cache_size, config.optimal_lookahead);
 
     // workload-info modular bloom filter
     LRUCache workinfo_modular_lru1(config.filter_cache_size), workinfo_modular_lru2(config.data_cache_size);
@@ -46,21 +52,21 @@ int main(int argc, char** argv) {
     OptimalCache workinfo_modular_optimal1(config.filter_cache_size, config.optimal_lookahead), workinfo_modular_optimal2(config.data_cache_size, config.optimal_lookahead);
 
     // normal bloom filter
-    // auto lru_res = simulate_normal(argv[1], config, &lru1, &lru2);
-    // std::cout << "LRU done" << std::endl;
-    // lru_res.generate_result_filename(config); lru_res.write_result();
-    //
-    // auto lfu_res = simulate_normal(argv[1], config, &lfu1, &lfu2);
-    // std::cout << "LFU done" << std::endl;
-    // lfu_res.generate_result_filename(config); lfu_res.write_result();
-    //
-    // auto lfu_abs_res = simulate_normal(argv[1], config, &lfu_absolute1, &lfu_absolute2);
-    // std::cout << "LFU-ABSOLUTE done" << std::endl;
-    // lfu_abs_res.generate_result_filename(config); lfu_abs_res.write_result();
-    //
-    // auto optimal_res = simulate_optimal(argv[1], config, &optimal1, &optimal2);
-    // std::cout << "OPTIMAL done" << std::endl;
-    // optimal_res.generate_result_filename(config); optimal_res.write_result();
+    auto lru_res = simulate_normal(argv[1], config, &lru1, &lru2);
+    std::cout << "LRU done" << std::endl;
+    lru_res.generate_result_filename(config); lru_res.write_result();
+
+    auto lfu_res = simulate_normal(argv[1], config, &lfu1, &lfu2);
+    std::cout << "LFU done" << std::endl;
+    lfu_res.generate_result_filename(config); lfu_res.write_result();
+
+    auto lfu_abs_res = simulate_normal(argv[1], config, &lfu_absolute1, &lfu_absolute2);
+    std::cout << "LFU-ABSOLUTE done" << std::endl;
+    lfu_abs_res.generate_result_filename(config); lfu_abs_res.write_result();
+
+    auto optimal_res = simulate_optimal(argv[1], config, &optimal1, &optimal2);
+    std::cout << "OPTIMAL done" << std::endl;
+    optimal_res.generate_result_filename(config); optimal_res.write_result();
 
     // vanilla modular bloom filter (no module count optimization)
     config.module_limit_optimized = kVanilla;
@@ -100,24 +106,43 @@ int main(int argc, char** argv) {
     std::cout << "COSTMODEL-MODULAR-OPTIMAL done" << std::endl;
     costmodel_modular_optimal_res.generate_result_filename(config); costmodel_modular_optimal_res.write_result();
 
-    // file-info modular bloom filter
-    config.module_limit_optimized = kFileInfo;
+    // file-info percentile modular bloom filter
+    config.module_limit_optimized = kFileInfoPercentile;
 
-    auto fileinfo_modular_lru_res = simulate_modular(argv[1], config, &fileinfo_modular_lru1, &fileinfo_modular_lru2);
-    std::cout << "FILEINFO-MODULAR-LRU done" << std::endl;
-    fileinfo_modular_lru_res.generate_result_filename(config); fileinfo_modular_lru_res.write_result();
+    auto fileinfo_percentile_modular_lru_res = simulate_modular(argv[1], config, &fileinfo_percentile_modular_lru1, &fileinfo_percentile_modular_lru2);
+    std::cout << "FILEINFO-PERCENTILE-MODULAR-LRU done" << std::endl;
+    fileinfo_percentile_modular_lru_res.generate_result_filename(config); fileinfo_percentile_modular_lru_res.write_result();
 
-    auto fileinfo_modular_lfu_res = simulate_modular(argv[1], config, &fileinfo_modular_lfu1, &fileinfo_modular_lfu2);
-    std::cout << "FILEINFO-MODULAR-LFU done" << std::endl;
-    fileinfo_modular_lfu_res.generate_result_filename(config); fileinfo_modular_lfu_res.write_result();
+    auto fileinfo_percentile_modular_lfu_res = simulate_modular(argv[1], config, &fileinfo_percentile_modular_lfu1, &fileinfo_percentile_modular_lfu2);
+    std::cout << "FILEINFO-PERCENTILE-MODULAR-LFU done" << std::endl;
+    fileinfo_percentile_modular_lfu_res.generate_result_filename(config); fileinfo_percentile_modular_lfu_res.write_result();
 
-    auto fileinfo_modular_lfuabs_res = simulate_modular(argv[1], config, &fileinfo_modular_lfuabs1, &fileinfo_modular_lfuabs2);
-    std::cout << "FILEINFO-MODULAR-LFUABS done" << std::endl;
-    fileinfo_modular_lfuabs_res.generate_result_filename(config); fileinfo_modular_lfuabs_res.write_result();
+    auto fileinfo_percentile_modular_lfuabs_res = simulate_modular(argv[1], config, &fileinfo_percentile_modular_lfuabs1, &fileinfo_percentile_modular_lfuabs2);
+    std::cout << "FILEINFO-PERCENTILE-MODULAR-LFUABS done" << std::endl;
+    fileinfo_percentile_modular_lfuabs_res.generate_result_filename(config); fileinfo_percentile_modular_lfuabs_res.write_result();
 
-    auto fileinfo_modular_optimal_res = simulate_optimal_modular(argv[1], config, &fileinfo_modular_optimal1, &fileinfo_modular_optimal2);
-    std::cout << "FILEINFO-MODULAR-OPTIMAL done" << std::endl;
-    fileinfo_modular_optimal_res.generate_result_filename(config); fileinfo_modular_optimal_res.write_result();
+    auto fileinfo_percentile_modular_optimal_res = simulate_optimal_modular(argv[1], config, &fileinfo_percentile_modular_optimal1, &fileinfo_percentile_modular_optimal2);
+    std::cout << "FILEINFO-PERCENTILE-MODULAR-OPTIMAL done" << std::endl;
+    fileinfo_percentile_modular_optimal_res.generate_result_filename(config); fileinfo_percentile_modular_optimal_res.write_result();
+
+    // file-info ratio modular bloom filter
+    config.module_limit_optimized = kFileInfoRatio;
+
+    auto fileinfo_ratio_modular_lru_res = simulate_modular(argv[1], config, &fileinfo_ratio_modular_lru1, &fileinfo_ratio_modular_lru2);
+    std::cout << "FILEINFO-RATIO-MODULAR-LRU done" << std::endl;
+    fileinfo_ratio_modular_lru_res.generate_result_filename(config); fileinfo_ratio_modular_lru_res.write_result();
+
+    auto fileinfo_ratio_modular_lfu_res = simulate_modular(argv[1], config, &fileinfo_ratio_modular_lfu1, &fileinfo_ratio_modular_lfu2);
+    std::cout << "FILEINFO-RATIO-MODULAR-LFU done" << std::endl;
+    fileinfo_ratio_modular_lfu_res.generate_result_filename(config); fileinfo_ratio_modular_lfu_res.write_result();
+
+    auto fileinfo_ratio_modular_lfuabs_res = simulate_modular(argv[1], config, &fileinfo_ratio_modular_lfuabs1, &fileinfo_ratio_modular_lfuabs2);
+    std::cout << "FILEINFO-RATIO-MODULAR-LFUABS done" << std::endl;
+    fileinfo_ratio_modular_lfuabs_res.generate_result_filename(config); fileinfo_ratio_modular_lfuabs_res.write_result();
+
+    auto fileinfo_ratio_modular_optimal_res = simulate_optimal_modular(argv[1], config, &fileinfo_ratio_modular_optimal1, &fileinfo_ratio_modular_optimal2);
+    std::cout << "FILEINFO-RATIO-MODULAR-OPTIMAL done" << std::endl;
+    fileinfo_ratio_modular_optimal_res.generate_result_filename(config); fileinfo_ratio_modular_optimal_res.write_result();
 
     // workload-info modular bloom filter
     config.module_limit_optimized = kWorkInfo;

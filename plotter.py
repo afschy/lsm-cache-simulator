@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Plot metrics of an aggregated .csv as grouped line charts.
 
-The .csv written by logs/aggregate_results.py holds one block per metric,
-separated by blank lines:
+The .csv written by logs/aggregate_results.py opens with the divisor its counts
+were scaled by, then holds one block per metric, separated by blank lines:
+
+    scale,<divisor>
 
     disk_reads,<workload>,<workload>,...
     <POLICY>,<value>,<value>,...
@@ -28,6 +30,7 @@ is skipped.
 import argparse
 import csv
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -49,6 +52,9 @@ METRICS = [
 ]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
+
+# <trace>_ep<N> -> N, the workload's empty query percentage.
+EMPTY_PERCENT_RE = re.compile(r"_ep(\d+)$")
 
 # Mode prefixes run_all_traces.sh puts before each trace name, longest first.
 MODE_PREFIXES = ("filter_data_", "filter_")
@@ -72,19 +78,23 @@ BASELINE = "#c3c2b7"
 
 
 def read_blocks(path):
-    """{metric: (workloads, {policy: [values]})} for every block in the .csv."""
-    blocks, header = {}, None
+    """({metric: (workloads, {policy: [values]})}, scale) for the .csv; scale is
+    None when the .csv does not record one."""
+    blocks, header, scale = {}, None, None
     with path.open(newline="") as file:
         for row in csv.reader(file):
             if not row or not row[0]:
                 header = None          # blank line ends the current block
+                continue
+            if header is None and row[0] == "scale":
+                scale = float(row[1])
                 continue
             if header is None:
                 header, series = row[0], {}
                 blocks[header] = (row[1:], series)
                 continue
             series[row[0]] = [float(cell) if cell else None for cell in row[1:]]
-    return blocks
+    return blocks, scale
 
 
 def metric_series(blocks, source):
@@ -120,6 +130,21 @@ def group_by_trace(workloads, series):
                    {policy: [values[i] for i in indices]
                     for policy, values in series.items()})
             for name, indices in groups.items()}
+
+
+def empty_percent(workload):
+    """The workload's empty query percentage as a tick label (normal_ep20 -> 20%)."""
+    match = EMPTY_PERCENT_RE.search(workload)
+    return f"{match.group(1)}%" if match else workload
+
+
+def y_label(metric, scale):
+    """The metric name, with the scaling factor for counts (rates are unscaled)."""
+    if metric.endswith("_rate") or scale is None or scale == 1:
+        return metric
+    exponent = math.log10(scale)
+    factor = (rf"10^{{{int(exponent)}}}" if exponent.is_integer() else f"{scale:g}")
+    return rf"{metric} ($\times {factor}$)"
 
 
 def has_data(series, policies):
@@ -225,7 +250,7 @@ def legend_grid(policies, styles):
             [p or "" for p in ordered], len(variants))
 
 
-def plot(workloads, series, policies, styles, metric, title):
+def plot(workloads, series, policies, styles, ylabel, title):
     """One line per policy across the workloads, marked at every workload."""
     positions = range(len(workloads))
 
@@ -241,9 +266,9 @@ def plot(workloads, series, policies, styles, metric, title):
                   markeredgecolor=SURFACE, markeredgewidth=1.0)
 
     axes.set_xticks(list(positions))
-    axes.set_xticklabels(workloads, rotation=30, ha="right", rotation_mode="anchor")
-    axes.set_ylabel(metric)
-    axes.set_xlabel("workload")
+    axes.set_xticklabels([empty_percent(workload) for workload in workloads])
+    axes.set_ylabel(ylabel)
+    axes.set_xlabel("empty query percentage")
     axes.margins(x=0.04)
     axes.set_ylim(bottom=0)
 
@@ -284,10 +309,12 @@ def main():
     args = parser.parse_args()
 
     try:
-        blocks = read_blocks(args.csv)
+        blocks, scale = read_blocks(args.csv)
     except OSError as error:
         print(error, file=sys.stderr)
         return 1
+    if scale is None:
+        print(f"{args.csv}: no scale row, count axes drawn without a factor", file=sys.stderr)
 
     output_dir = args.output or OUTPUT_DIR / args.csv.stem
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -314,8 +341,8 @@ def main():
                 print(f"{args.csv}: {name} {metric} is empty, skipped", file=sys.stderr)
                 continue
 
-            figure = plot(trace_workloads, trace_series, policies, styles, metric,
-                          f"{metric} - {name} - {args.csv.stem}")
+            figure = plot(trace_workloads, trace_series, policies, styles,
+                          y_label(metric, scale), f"{metric} - {name} - {args.csv.stem}")
             trace_dir = output_dir / name
             trace_dir.mkdir(exist_ok=True)
             output = trace_dir / f"{metric}.pdf"

@@ -250,8 +250,9 @@ def legend_grid(policies, styles):
             [p or "" for p in ordered], len(variants))
 
 
-def plot(workloads, series, policies, styles, ylabel, title):
-    """One line per policy across the workloads, marked at every workload."""
+def plot(workloads, series, policies, styles, ylabel, title, ymax=None):
+    """One line per policy across the workloads, marked at every workload; ymax,
+    in the axis's own (already scaled) units, caps the y axis."""
     positions = range(len(workloads))
 
     figure, axes = plt.subplots(figsize=(max(8.0, 1.7 * len(workloads)), 6.0))
@@ -270,7 +271,7 @@ def plot(workloads, series, policies, styles, ylabel, title):
     axes.set_ylabel(ylabel)
     axes.set_xlabel("empty query percentage")
     axes.margins(x=0.04)
-    axes.set_ylim(bottom=0)
+    axes.set_ylim(bottom=0, top=ymax)
 
     axes.set_axisbelow(True)
     axes.grid(axis="y", color=GRIDLINE, linewidth=0.8)
@@ -306,7 +307,13 @@ def main():
     parser.add_argument("-o", "--output", type=Path,
                         help="output directory, one subdirectory per trace name "
                              "(default: plots/<csv stem>/)")
+    parser.add_argument("-y", "--ylim", type=float, metavar="Y",
+                        help="upper y-axis limit for every chart, without the scaling "
+                             "factor (0.3 on a x10^8 axis caps it at 0.3 x 10^8; "
+                             "default: fit the data)")
     args = parser.parse_args()
+    if args.ylim is not None and args.ylim <= 0:
+        parser.error("--ylim must be positive")
 
     try:
         blocks, scale = read_blocks(args.csv)
@@ -342,7 +349,8 @@ def main():
                 continue
 
             figure = plot(trace_workloads, trace_series, policies, styles,
-                          y_label(metric, scale), f"{metric} - {name} - {args.csv.stem}")
+                          y_label(metric, scale), f"{metric} - {name} - {args.csv.stem}",
+                          args.ylim)
             trace_dir = output_dir / name
             trace_dir.mkdir(exist_ok=True)
             output = trace_dir / f"{metric}.pdf"

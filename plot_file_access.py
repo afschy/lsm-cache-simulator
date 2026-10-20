@@ -6,8 +6,8 @@ Files run along the x axis in the .csv's order (level, then smallest key, then
 largest key), and a dashed vertical line separates consecutive levels.  On a
 linear axis the y range is capped at twice the tallest bar outside level 0
 (rounded up to a nice number), so level 0 doesn't flatten the rest; clipped
-bars stop at the cap, whose tick reads "<cap>+".  --skip x drops levels 0 through x; the plots then
-get a _skip<x> suffix.
+bars stop at the cap, whose tick reads "<cap>+".  Files with zero accesses get a marker at the
+x axis.  --skip x drops levels 0 through x; the plots then get a _skip<x> suffix.
 """
 
 import argparse
@@ -25,6 +25,7 @@ BAR_COLOR = "#2a78d6"
 INK = "#0b0b0b"
 MUTED_INK = "#52514e"
 GRID = "#e1e0d9"
+MARK_COLOR = "#d6542a"
 
 
 def read_csv(path):
@@ -50,6 +51,17 @@ def y_cap(levels, counts):
         return None
     cap = nice_ceil(2 * max(rest))
     return cap if max(counts) > cap else None
+
+
+def mark_zero_bars(ax, counts):
+    """Marks zero-count files just above the x axis, since their bars draw nothing."""
+    zero = [i for i, c in enumerate(counts) if c == 0]
+    if not zero:
+        return
+    ax.plot(zero, [0.02] * len(zero), linestyle="none", marker="o", markersize=3.5,
+            markeredgewidth=0.8, markerfacecolor="none", color=MARK_COLOR,
+            transform=ax.get_xaxis_transform(), clip_on=False, label="0 accesses")
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.9, edgecolor=GRID)
 
 
 def plot(levels, counts, title, ylabel, out_path, log_scale):
@@ -86,6 +98,7 @@ def plot(levels, counts, title, ylabel, out_path, log_scale):
         ax.set_ylim(0, cap)
         ax.set_yticks(ticks)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}" + ("+" if v >= cap else "")))
+    mark_zero_bars(ax, counts)
     ax.set_xlabel("SST file (sorted by level, then smallest key, then largest key)", color=INK)
     ax.set_ylabel(ylabel, color=INK)
     ax.set_title(title, color=INK, pad=28)

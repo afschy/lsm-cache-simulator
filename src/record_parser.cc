@@ -49,6 +49,8 @@ void Record::reset() {
 
     no_insert = false;
     new_level = 0;
+    smallest_key = "";
+    largest_key = "";
 }
 
 bool RecordParser::parse_next_record(Record* out_record) {
@@ -118,12 +120,17 @@ bool RecordParser::parse_get(Record* out_record, const std::string& read_line) {
 
             static std::vector<std::string_view> block_fields;
             split_string(block_fields, probe_fields[i], '/');
-            if (block_fields.size() < 4) return false;
+            if (block_fields.size() < 5) return false;
 
-            block.block_id = string_view_to_number(block_fields[0], success);
-            block.seq = string_view_to_number(block_fields[1], success);
-            block.read_bytes = string_view_to_number(block_fields[2], success);
-            block.uncomp_bytes = string_view_to_number(block_fields[3], success);
+            if (block_fields[0] == "i") block.type = BlockType::kIndex;
+            else if (block_fields[0] == "f") block.type = BlockType::kFilter;
+            else if (block_fields[0] == "d") block.type = BlockType::kData;
+            else block.type = BlockType::kUndefined;
+
+            block.block_id = string_view_to_number(block_fields[1], success);
+            block.seq = string_view_to_number(block_fields[2], success);
+            block.read_bytes = string_view_to_number(block_fields[3], success);
+            block.uncomp_bytes = string_view_to_number(block_fields[4], success);
 
             probe.blocks.push_back(block);
             out_record->blocks.push_back(block);
@@ -163,13 +170,18 @@ bool RecordParser::parse_iterator(Record* out_record, const std::string& read_li
     for (auto block_str : block_list) {
         static std::vector<std::string_view> block_fields;
         split_string(block_fields, block_str, '/');
-        if (block_fields.size() < 4) return false;
+        if (block_fields.size() < 5) return false;
 
         Block block;
-        block.block_id = string_view_to_number(block_fields[0], success);
-        block.seq = string_view_to_number(block_fields[1], success);
-        block.read_bytes = string_view_to_number(block_fields[2], success);
-        block.uncomp_bytes = string_view_to_number(block_fields[3], success);
+        if (block_fields[0] == "i") block.type = BlockType::kIndex;
+        else if (block_fields[0] == "f") block.type = BlockType::kFilter;
+        else if (block_fields[0] == "d") block.type = BlockType::kData;
+        else block.type = BlockType::kUndefined;
+
+        block.block_id = string_view_to_number(block_fields[1], success);
+        block.seq = string_view_to_number(block_fields[2], success);
+        block.read_bytes = string_view_to_number(block_fields[3], success);
+        block.uncomp_bytes = string_view_to_number(block_fields[4], success);
 
         out_record->blocks.push_back(block);
     }

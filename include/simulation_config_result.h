@@ -101,6 +101,9 @@ struct SimulationResult {
     uint32_t hit_count = 0;
     uint32_t miss_count = 0;
 
+    uint32_t index_hit_count = 0;
+    uint32_t index_miss_count = 0;
+
     uint32_t filter_hit_count = 0;
     uint32_t filter_miss_count = 0;
 
@@ -143,6 +146,10 @@ struct SimulationResult {
         fprintf(file, "total_count %u\n", hit_count+miss_count);
         fprintf(file, "hit_count %u\n", hit_count);
         fprintf(file, "miss_count %u\n", miss_count);
+
+        fprintf(file, "index_count %u\n", index_hit_count+index_miss_count);
+        fprintf(file, "index_hit_count %u\n", index_hit_count);
+        fprintf(file, "index_miss_count %u\n", index_miss_count);
 
         fprintf(file, "filter_count %u\n", filter_hit_count+filter_miss_count);
         fprintf(file, "filter_hit_count %u\n", filter_hit_count);

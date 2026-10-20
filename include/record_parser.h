@@ -31,7 +31,15 @@ enum class OverallOutcome: uint8_t {
     kNotApplicable
 };
 
+enum class BlockType: uint8_t {
+    kUndefined,
+    kIndex,
+    kFilter,
+    kData
+};
+
 struct Block {
+    BlockType type = BlockType::kUndefined;
     uint64_t block_id;
     uint64_t seq;
     uint64_t read_bytes;

@@ -34,7 +34,7 @@ SimulationResult simulate_normal(const char* trace_file_name, const SimulationCo
         if (curr_record.record_type == kFileDelete) {
             auto it = file_map.find(curr_record.file_id);
             if (it != file_map.end()) {
-                release_filters_of_file(filter_cache, it->second, config);
+                filter_cache->remove_file_blocks(it->second);
                 data_cache->remove_file_blocks(it->second);
             }
             continue;
@@ -82,9 +82,31 @@ SimulationResult simulate_normal(const char* trace_file_name, const SimulationCo
                 if (!bloom_result) continue;    // no false positive, no blocks read
             }
             
-            for (const Block& data_block : curr_probe.blocks) {
-                CacheBlock cache_block(BlockType::kData, curr_probe.file_id, data_block.block_id, curr_probe.level, data_block.uncomp_bytes, curr_record.lookup_id);
+            for (const Block& curr_block : curr_probe.blocks) {
+                CacheBlock cache_block(curr_block.type, curr_probe.file_id, curr_block.block_id, curr_probe.level, curr_block.uncomp_bytes, curr_record.lookup_id);
 
+                if (cache_block.block_type_ == BlockType::kIndex) {
+                    if (filter_cache->block_exists(cache_block)) {
+                        filter_cache->record_access(cache_block);
+                        result.hit_count++;
+                        result.index_hit_count++;
+                    }
+                    else {
+                        filter_cache->insert_block(cache_block);
+                        result.miss_count++;
+                        result.index_miss_count++;
+                        if (outcome == FileOutcome::kNotFound) result.extra_read_count++;
+                    }
+
+                    if (++curr_access == config.series_per_record) {
+                        curr_access = 0;
+                        result.push();
+                    }
+                    continue;
+                }
+                if (cache_block.block_type_ != BlockType::kData) continue;
+
+                // Data block handling logic
                 if (data_cache->block_exists(cache_block)) {
                     data_cache->record_access(cache_block);
                     result.hit_count++;
@@ -128,13 +150,27 @@ SimulationResult simulate_optimal(const char* trace_file_name, const SimulationC
 
     // consumes the oldest lookahead entry; the caller must ensure the lookahead isn't empty
     auto consume_filter_lookahead = [&]() {
+        CacheBlock lookahead_front;
+        if (filter_cache->lookahead_.size())
+            lookahead_front = filter_cache->lookahead_.front();
+        BlockType type = lookahead_front.block_type_;
+
         if (filter_cache->advance_lookahead()) {
             result.hit_count++;
-            result.filter_hit_count++;
+            if (type == BlockType::kFilter)
+                result.filter_hit_count++;
+            else if (type == BlockType::kIndex)
+                result.index_hit_count++;
         }
         else {
             result.miss_count++;
-            result.filter_miss_count++;
+            if (type == BlockType::kFilter)
+                result.filter_miss_count++;
+            else if (type == BlockType::kIndex) {
+                result.index_miss_count++;
+                std::pair<uint64_t, uint64_t> key_pair(lookahead_front.file_id_, lookahead_front.lookup_id_);
+                if (unnecessary_access_map.find(key_pair) != unnecessary_access_map.end()) result.extra_read_count++;
+            }
         }
 
         if (++curr_access == config.series_per_record) {
@@ -211,9 +247,12 @@ SimulationResult simulate_optimal(const char* trace_file_name, const SimulationC
                     else continue;
                 }
 
-                for (const Block& data_block: curr_probe.blocks) {
-                    CacheBlock cache_block(BlockType::kData, curr_probe.file_id, data_block.block_id, curr_probe.level, data_block.uncomp_bytes, curr_record.lookup_id);
-                    data_cache->add_lookahead(cache_block);
+                for (const Block& curr_block: curr_probe.blocks) {
+                    CacheBlock cache_block(curr_block.type, curr_probe.file_id, curr_block.block_id, curr_probe.level, curr_block.uncomp_bytes, curr_record.lookup_id);
+                    if (cache_block.block_type_ == BlockType::kIndex)
+                        filter_cache->add_lookahead(cache_block);
+                    else if (cache_block.block_type_ == BlockType::kData)
+                        data_cache->add_lookahead(cache_block);
                 }
             }
         }
@@ -258,13 +297,27 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
 
     // consumes the oldest lookahead entry; the caller must ensure the lookahead isn't empty
     auto consume_filter_lookahead = [&]() {
+        CacheBlock lookahead_front;
+        if (filter_cache->lookahead_.size())
+            lookahead_front = filter_cache->lookahead_.front();
+        BlockType type = lookahead_front.block_type_;
+
         if (filter_cache->advance_lookahead()) {
             result.hit_count++;
-            result.filter_hit_count++;
+            if (type == BlockType::kFilter)
+                result.filter_hit_count++;
+            else if (type == BlockType::kIndex)
+                result.index_hit_count++;
         }
         else {
             result.miss_count++;
-            result.filter_miss_count++;
+            if (type == BlockType::kFilter)
+                result.filter_miss_count++;
+            else if (type == BlockType::kIndex) {
+                result.index_miss_count++;
+                std::pair<uint64_t, uint64_t> key_pair(lookahead_front.file_id_, lookahead_front.lookup_id_);
+                if (unnecessary_access_map.find(key_pair) != unnecessary_access_map.end()) result.extra_read_count++;
+            }
         }
 
         if (++curr_access == config.series_per_record) {
@@ -365,9 +418,12 @@ SimulationResult simulate_optimal_modular(const char* trace_file_name, const Sim
             std::pair<uint64_t, uint64_t> key_pair(curr_probe.file_id, get_record.lookup_id);
             if (outcome == FileOutcome::kNotFound) unnecessary_access_map[key_pair] = true;
 
-            for (const Block& data_block: curr_probe.blocks) {
-                CacheBlock cache_block(BlockType::kData, curr_probe.file_id, data_block.block_id, curr_probe.level, data_block.uncomp_bytes, get_record.lookup_id);
-                data_cache->add_lookahead(cache_block);
+            for (const Block& curr_block: curr_probe.blocks) {
+                CacheBlock cache_block(curr_block.type, curr_probe.file_id, curr_block.block_id, curr_probe.level, curr_block.uncomp_bytes, get_record.lookup_id);
+                if (cache_block.block_type_ == BlockType::kIndex)
+                    filter_cache->add_lookahead(cache_block);
+                else if (cache_block.block_type_ == BlockType::kData)
+                    data_cache->add_lookahead(cache_block);
             }
         }
 
@@ -478,7 +534,7 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
         if (curr_record.record_type == kFileDelete) {
             auto it = file_map.find(curr_record.file_id);
             if (it != file_map.end()) {
-                release_filters_of_file(filter_cache, it->second, config);
+                filter_cache->remove_file_blocks(it->second);
                 data_cache->remove_file_blocks(it->second);
                 it->second.deleted = true;
             }
@@ -581,9 +637,31 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
             if (outcome == FileOutcome::kNotFound && verdict == false)
                 continue;
             
-            for (const Block& data_block : curr_probe.blocks) {
-                CacheBlock cache_block(BlockType::kData, curr_probe.file_id, data_block.block_id, curr_probe.level, data_block.uncomp_bytes, curr_record.lookup_id);
+            for (const Block& curr_block : curr_probe.blocks) {
+                CacheBlock cache_block(curr_block.type, curr_probe.file_id, curr_block.block_id, curr_probe.level, curr_block.uncomp_bytes, curr_record.lookup_id);
 
+                if (cache_block.block_type_ == BlockType::kIndex) {
+                    if (filter_cache->block_exists(cache_block)) {
+                        filter_cache->record_access(cache_block);
+                        result.hit_count++;
+                        result.index_hit_count++;
+                    }
+                    else {
+                        filter_cache->insert_block(cache_block);
+                        result.miss_count++;
+                        result.index_miss_count++;
+                        if (outcome == FileOutcome::kNotFound) result.extra_read_count++;
+                    }
+
+                    if (++curr_access == config.series_per_record) {
+                        curr_access = 0;
+                        result.push();
+                    }
+                    continue;
+                }
+                if (cache_block.block_type_ != BlockType::kData) continue;
+
+                // Data block handling logic
                 if (data_cache->block_exists(cache_block)) {
                     data_cache->record_access(cache_block);
                     result.hit_count++;

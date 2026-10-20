@@ -1,7 +1,7 @@
 mode 1
 module_limit_optimized 1
-filter_cache_size 4194304 
-data_cache_size 4194304
+filter_cache_size 39845888 
+data_cache_size 39845888
 default_block_size 4096
 bits_per_key 16
 optimal_lookahead 10000

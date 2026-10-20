@@ -3,13 +3,6 @@
 #include <cstdint>
 #include <string>
 
-enum class BlockType: uint8_t {
-    kFilter,
-    kIndex,
-    kData,
-    kUndefined
-};
-
 struct CacheBlock {
     BlockType block_type_ = BlockType::kUndefined;
     uint64_t file_id_ = UINT64_MAX;

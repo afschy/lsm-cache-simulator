@@ -10,9 +10,9 @@ were scaled by, then holds one block per metric, separated by blank lines:
     <POLICY>,<value>,<value>,...
 
 One chart is drawn per metric: disk_reads and the miss counts straight from
-their blocks (miss_count, filter_miss_count, data_miss_count), plus the matching
-miss rates -- miss_rate from its block, and filter_miss_rate / data_miss_rate as
-the ratios filter_miss_count/filter_count and data_miss_count/data_count (the
+their blocks (miss_count, filter_miss_count, index_miss_count, data_miss_count),
+plus the matching miss rates -- miss_rate from its block, and filter_miss_rate /
+index_miss_rate / data_miss_rate as the ratios <x>_miss_count/<x>_count (the
 shared count scale cancels in the ratio).  In every chart the workloads run
 along the x axis and each policy is one line across them.  Policies are split
 into a base and a variant prefix (FILEINFO_RATIO_MODULAR_LRU -> LRU, FILEINFO_RATIO_MODULAR_):
@@ -23,8 +23,12 @@ command line every policy in the file is drawn, in file order; naming policies
 Workloads are grouped by trace name, the word before the first
 underscore once the runner's mode prefix is dropped (filter_data_uniform_ep0 ->
 uniform), and each group is written to plots/<csv stem>/<trace name>/<metric>.pdf;
-a metric whose columns are blank (e.g. the filter/data metrics for a mode-0 set)
+a metric whose columns are blank (e.g. the filter/index/data metrics for a mode-0 set)
 is skipped.
+
+--count (the default) draws the charts above; --bytes draws their byte
+counterparts instead (disk_read_bytes, miss_bytes, miss_byte_rate and the
+<x>_miss_bytes / <x>_miss_byte_rate pairs), in MiB with no scaling factor.
 """
 
 import argparse
@@ -41,14 +45,29 @@ from matplotlib.lines import Line2D
 
 # (name, source) per chart.  A "block" source is read straight from the .csv; a
 # "ratio" source divides the first block by the second, cell by cell.
-METRICS = [
+COUNT_METRICS = [
     ("disk_reads", ("block", "disk_reads")),
     ("miss_count", ("block", "miss_count")),
     ("miss_rate", ("block", "miss_rate")),
     ("filter_miss_count", ("block", "filter_miss_count")),
     ("filter_miss_rate", ("ratio", "filter_miss_count", "filter_count")),
+    ("index_miss_count", ("block", "index_miss_count")),
+    ("index_miss_rate", ("ratio", "index_miss_count", "index_count")),
     ("data_miss_count", ("block", "data_miss_count")),
     ("data_miss_rate", ("ratio", "data_miss_count", "data_count")),
+]
+
+# Byte blocks are already in MiB in the .csv.
+BYTE_METRICS = [
+    ("disk_read_bytes", ("block", "disk_read_bytes")),
+    ("miss_bytes", ("block", "miss_bytes")),
+    ("miss_byte_rate", ("block", "miss_byte_rate")),
+    ("filter_miss_bytes", ("block", "filter_miss_bytes")),
+    ("filter_miss_byte_rate", ("ratio", "filter_miss_bytes", "filter_bytes")),
+    ("index_miss_bytes", ("block", "index_miss_bytes")),
+    ("index_miss_byte_rate", ("ratio", "index_miss_bytes", "index_bytes")),
+    ("data_miss_bytes", ("block", "data_miss_bytes")),
+    ("data_miss_byte_rate", ("ratio", "data_miss_bytes", "data_bytes")),
 ]
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
@@ -138,9 +157,14 @@ def empty_percent(workload):
     return f"{match.group(1)}%" if match else workload
 
 
-def y_label(metric, scale):
-    """The metric name, with the scaling factor for counts (rates are unscaled)."""
-    if metric.endswith("_rate") or scale is None or scale == 1:
+def y_label(metric, scale, unit):
+    """The metric name, with the scaling factor for counts or MiB for bytes
+    (rates are unscaled)."""
+    if metric.endswith("_rate"):
+        return metric
+    if unit == "bytes":
+        return f"{metric} (MiB)"
+    if scale is None or scale == 1:
         return metric
     exponent = math.log10(scale)
     factor = (rf"10^{{{int(exponent)}}}" if exponent.is_integer() else f"{scale:g}")
@@ -310,7 +334,13 @@ def main():
     parser.add_argument("-y", "--ylim", type=float, metavar="Y",
                         help="upper y-axis limit for every chart, without the scaling "
                              "factor (0.3 on a x10^8 axis caps it at 0.3 x 10^8; "
-                             "default: fit the data)")
+                             "MiB with --bytes; default: fit the data)")
+    unit = parser.add_mutually_exclusive_group()
+    unit.add_argument("--count", dest="unit", action="store_const", const="count",
+                      help="plot block counts (default)")
+    unit.add_argument("--bytes", dest="unit", action="store_const", const="bytes",
+                      help="plot bytes, in MiB")
+    parser.set_defaults(unit="count")
     args = parser.parse_args()
     if args.ylim is not None and args.ylim <= 0:
         parser.error("--ylim must be positive")
@@ -320,14 +350,14 @@ def main():
     except OSError as error:
         print(error, file=sys.stderr)
         return 1
-    if scale is None:
+    if scale is None and args.unit == "count":
         print(f"{args.csv}: no scale row, count axes drawn without a factor", file=sys.stderr)
 
     output_dir = args.output or OUTPUT_DIR / args.csv.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
     written = 0
-    for metric, source in METRICS:
+    for metric, source in (BYTE_METRICS if args.unit == "bytes" else COUNT_METRICS):
         try:
             workloads, series = metric_series(blocks, source)
         except KeyError:
@@ -349,7 +379,7 @@ def main():
                 continue
 
             figure = plot(trace_workloads, trace_series, policies, styles,
-                          y_label(metric, scale), f"{metric} - {name} - {args.csv.stem}",
+                          y_label(metric, scale, args.unit), f"{metric} - {name} - {args.csv.stem}",
                           args.ylim)
             trace_dir = output_dir / name
             trace_dir.mkdir(exist_ok=True)

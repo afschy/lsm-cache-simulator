@@ -1,5 +1,6 @@
 #pragma once
 #include <charconv>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -99,18 +100,27 @@ struct SimulationConfig {
 
 struct SimulationResult {
     uint32_t hit_count = 0;
+    uint64_t hit_bytes = 0;
     uint32_t miss_count = 0;
+    uint64_t miss_bytes = 0;
 
     uint32_t index_hit_count = 0;
+    uint64_t index_hit_bytes = 0;
     uint32_t index_miss_count = 0;
+    uint64_t index_miss_bytes = 0;
 
     uint32_t filter_hit_count = 0;
+    uint64_t filter_hit_bytes = 0;
     uint32_t filter_miss_count = 0;
+    uint64_t filter_miss_bytes = 0;
 
     uint32_t data_hit_count = 0;
+    uint64_t data_hit_bytes = 0;
     uint32_t data_miss_count = 0;
+    uint64_t data_miss_bytes = 0;
 
     uint32_t extra_read_count = 0;
+    uint64_t extra_read_bytes = 0;
 
     std::vector<uint32_t> hit_series;
     std::vector<uint32_t> miss_series;
@@ -159,7 +169,24 @@ struct SimulationResult {
         fprintf(file, "data_hit_count %u\n", data_hit_count);
         fprintf(file, "data_miss_count %u\n", data_miss_count);
 
+        fprintf(file, "total_bytes %" PRIu64 "\n", hit_bytes+miss_bytes);
+        fprintf(file, "hit_bytes %" PRIu64 "\n", hit_bytes);
+        fprintf(file, "miss_bytes %" PRIu64 "\n", miss_bytes);
+
+        fprintf(file, "index_bytes %" PRIu64 "\n", index_hit_bytes+index_miss_bytes);
+        fprintf(file, "index_hit_bytes %" PRIu64 "\n", index_hit_bytes);
+        fprintf(file, "index_miss_bytes %" PRIu64 "\n", index_miss_bytes);
+
+        fprintf(file, "filter_bytes %" PRIu64 "\n", filter_hit_bytes+filter_miss_bytes);
+        fprintf(file, "filter_hit_bytes %" PRIu64 "\n", filter_hit_bytes);
+        fprintf(file, "filter_miss_bytes %" PRIu64 "\n", filter_miss_bytes);
+
+        fprintf(file, "data_bytes %" PRIu64 "\n", data_hit_bytes+data_miss_bytes);
+        fprintf(file, "data_hit_bytes %" PRIu64 "\n", data_hit_bytes);
+        fprintf(file, "data_miss_bytes %" PRIu64 "\n", data_miss_bytes);
+
         fprintf(file, "extra_read_count %u\n", extra_read_count);
+        fprintf(file, "extra_read_bytes %" PRIu64 "\n", extra_read_bytes);
         fprintf(file, "series_per_record %u\n", series_per_record);
 
         fprintf(file, "hit_series");

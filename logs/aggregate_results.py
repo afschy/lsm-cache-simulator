@@ -10,7 +10,9 @@ cluster, written as <root>/fcs<F>_dcs<D>_<set>.{md,csv}.  A table is emitted
 with one column per <trace> directory and one row per policy, repeated for each
 of the reported metrics.  Policies that a trace directory is missing are left
 blank; logs whose fcs/dcs differ from their set directory's are skipped.
-The .csv opens with a "scale,<divisor>" row, then a blank line, then the tables.
+Counts are divided by --scale, byte metrics are reported in MiB and rates are
+left as ratios.  The .csv opens with a "scale,<divisor>" row, then a blank line,
+then the tables.
 """
 
 import argparse
@@ -25,38 +27,71 @@ def _sum(values, *keys):
     return None if any(n is None for n in numbers) else sum(numbers)
 
 
-def _miss_rate(values):
-    miss, total = values.get("miss_count"), values.get("total_count")
-    return None if miss is None or not total else miss / total
+def _ratio(num_key, den_key):
+    """Extractor for values[num_key] / values[den_key], None when unavailable."""
+    def extract(values):
+        num, den = values.get(num_key), values.get(den_key)
+        return None if num is None or not den else num / den
+    return extract
 
 
-# (label, extractor, scaled) triples, in report order.  Extractors take the
-# parsed counters of one log and return a number, or None when unavailable;
-# miss_rate is a ratio and is the one metric the scale never touches.
+def _get(key):
+    return lambda v: v.get(key)
+
+
+# (label, extractor, kind) triples, in report order.  Extractors take the parsed
+# counters of one log and return a number, or None when unavailable.  "count"
+# metrics are divided by the scale, "bytes" are reported in MiB, "rate" is untouched.
 METRICS = [
-    ("hit_count", lambda v: v.get("hit_count"), True),
-    ("miss_count", lambda v: v.get("miss_count"), True),
-    ("miss_rate", _miss_rate, False),
-    ("extra_read_count", lambda v: v.get("extra_read_count"), True),
-    ("disk_reads", lambda v: _sum(v, "miss_count", "extra_read_count"), True),
-    # Mode-1 (filter_data_) logs additionally split hits/misses across the filter
-    # and data caches; these are blank for mode-0 logs that never report them.
-    ("filter_count", lambda v: v.get("filter_count"), True),
-    ("filter_hit_count", lambda v: v.get("filter_hit_count"), True),
-    ("filter_miss_count", lambda v: v.get("filter_miss_count"), True),
-    ("data_count", lambda v: v.get("data_count"), True),
-    ("data_hit_count", lambda v: v.get("data_hit_count"), True),
-    ("data_miss_count", lambda v: v.get("data_miss_count"), True),
+    ("hit_count", _get("hit_count"), "count"),
+    ("miss_count", _get("miss_count"), "count"),
+    ("miss_rate", _ratio("miss_count", "total_count"), "rate"),
+    ("extra_read_count", _get("extra_read_count"), "count"),
+    ("disk_reads", lambda v: _sum(v, "miss_count", "extra_read_count"), "count"),
+    # Mode-1 (filter_data_) logs additionally split hits/misses across the index,
+    # filter and data caches; these are blank for mode-0 logs that never report them.
+    ("index_count", _get("index_count"), "count"),
+    ("index_hit_count", _get("index_hit_count"), "count"),
+    ("index_miss_count", _get("index_miss_count"), "count"),
+    ("filter_count", _get("filter_count"), "count"),
+    ("filter_hit_count", _get("filter_hit_count"), "count"),
+    ("filter_miss_count", _get("filter_miss_count"), "count"),
+    ("data_count", _get("data_count"), "count"),
+    ("data_hit_count", _get("data_hit_count"), "count"),
+    ("data_miss_count", _get("data_miss_count"), "count"),
+    # Byte counterparts of the above; blank for logs written before byte accounting.
+    ("hit_bytes", _get("hit_bytes"), "bytes"),
+    ("miss_bytes", _get("miss_bytes"), "bytes"),
+    ("miss_byte_rate", _ratio("miss_bytes", "total_bytes"), "rate"),
+    ("extra_read_bytes", _get("extra_read_bytes"), "bytes"),
+    ("disk_read_bytes", lambda v: _sum(v, "miss_bytes", "extra_read_bytes"), "bytes"),
+    ("index_bytes", _get("index_bytes"), "bytes"),
+    ("index_hit_bytes", _get("index_hit_bytes"), "bytes"),
+    ("index_miss_bytes", _get("index_miss_bytes"), "bytes"),
+    ("filter_bytes", _get("filter_bytes"), "bytes"),
+    ("filter_hit_bytes", _get("filter_hit_bytes"), "bytes"),
+    ("filter_miss_bytes", _get("filter_miss_bytes"), "bytes"),
+    ("data_bytes", _get("data_bytes"), "bytes"),
+    ("data_hit_bytes", _get("data_hit_bytes"), "bytes"),
+    ("data_miss_bytes", _get("data_miss_bytes"), "bytes"),
 ]
 
+# filter_data_ traces sum their disk reads from the filter/index/data misses.
+FILTER_DATA_DISK_READS = {
+    "disk_reads": ("filter_miss_count", "index_miss_count", "data_miss_count"),
+    "disk_read_bytes": ("filter_miss_bytes", "index_miss_bytes", "data_miss_bytes"),
+}
+
+
 def extractor_for(label, extract, trace_name):
-    """filter_data_ traces sum disk_reads from the filter/data misses."""
-    if label == "disk_reads" and trace_name.startswith("filter_data_"):
-        return lambda v: _sum(v, "filter_miss_count", "data_miss_count")
+    """The metric's extractor, with disk reads overridden for filter_data_ traces."""
+    if label in FILTER_DATA_DISK_READS and trace_name.startswith("filter_data_"):
+        return lambda v: _sum(v, *FILTER_DATA_DISK_READS[label])
     return extract
 
 
 DEFAULT_SCALE = 1e8
+MIB = 1 << 20
 PRECISION = 4
 
 # POLICY_mode<M>_fcs<F>_dcs<D>_..._bpk<...>.log -> POLICY, F, D
@@ -108,30 +143,33 @@ def collect(set_dir, sizes):
     return traces
 
 
-def cell(values, extract, scaled, scale):
+def divisor(kind, scale):
+    return {"count": scale, "bytes": MIB, "rate": 1}[kind]
+
+
+def cell(values, extract, div):
     """Format one metric of one policy, or "" when the data is unavailable."""
     if values is None:
         return ""
     number = extract(values)
     if number is None:
         return ""
-    return f"{number / scale if scaled else number:.{PRECISION}f}"
+    return f"{number / div:.{PRECISION}f}"
 
 
-def build_table(traces, policies, label, extract, scaled, scale):
+def build_table(traces, policies, label, extract, div):
     """Header row plus one row per policy, all cells already formatted."""
     trace_names = list(traces)
     rows = [[label] + trace_names]
     for policy in policies:
-        rows.append([policy] + [cell(traces[t].get(policy), extractor_for(label, extract, t),
-                                     scaled, scale)
+        rows.append([policy] + [cell(traces[t].get(policy), extractor_for(label, extract, t), div)
                                 for t in trace_names])
     return rows
 
 
 def write_markdown(path, set_name, tables, scale):
     lines = [f"# {set_name}", "",
-             f"Counts scaled by 1/{scale:g}; miss_rate is a ratio.", ""]
+             f"Counts scaled by 1/{scale:g}; bytes in MiB; rates are ratios.", ""]
     # A single width shared by every column of every table, so the whole file
     # lines up as one grid.
     columns = len(tables[0][1][0])
@@ -168,7 +206,7 @@ def main():
     parser.add_argument("root", nargs="?", default=Path(__file__).resolve().parent,
                         type=Path, help="directory holding the log sets (default: %(default)s)")
     parser.add_argument("--scale", type=float, default=DEFAULT_SCALE,
-                        help="divisor for every count; miss_rate is never scaled "
+                        help="divisor for every count; bytes are in MiB and rates are never scaled "
                              "(default: %(default)g)")
     args = parser.parse_args()
 
@@ -192,8 +230,8 @@ def main():
             continue
 
         policies = sorted({p for t in traces.values() for p in t})
-        tables = [(label, build_table(traces, policies, label, extract, scaled, args.scale))
-                  for label, extract, scaled in METRICS]
+        tables = [(label, build_table(traces, policies, label, extract, divisor(kind, args.scale)))
+                  for label, extract, kind in METRICS]
 
         write_markdown(args.root / f"{set_dir.name}.md", set_dir.name, tables, args.scale)
         write_csv(args.root / f"{set_dir.name}.csv", tables, args.scale)

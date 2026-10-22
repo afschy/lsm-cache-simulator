@@ -1,7 +1,7 @@
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <map>
 #include <unordered_map>
 #include <vector>
 #include "cache.h"
@@ -163,9 +163,20 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
     SimulationResult result;
     uint16_t curr_access = 0;
 
-    std::unordered_map<uint64_t, FileMetadata> file_map;    // file_id to metadata object
-    std::unordered_map<uint64_t, uint64_t> empty_access_map;    // file_id to empty access count map
-    std::unordered_map<uint64_t, uint64_t> total_access_map;    // file_id to probe count map
+    std::unordered_map<uint64_t, FileMetadata> file_map;             // file_id to metadata object
+
+    std::vector<std::pair<uint64_t, uint64_t>> empty_access_list;    // list of <file_id, empty_count> sorted on empty_count
+    std::unordered_map<uint64_t, uint64_t> empty_access_index;       // file_id to index map for empty_access_list
+    uint64_t empty_nonzero_count = 0;                                // non-zero entries form a prefix of empty_access_list
+
+    std::vector<std::pair<uint64_t, uint64_t>> total_access_list;    // list of <file_id, empty_count> sorted on empty_count
+    std::unordered_map<uint64_t, uint64_t> total_access_index;       // file_id to index map for empty_access_list
+
+    RatioTree ratio_tree;
+    // only valid for files with a non-zero total count
+    auto ratio_key = [&](uint64_t file_id) {
+        return RatioKey(get_adjusted_ratio(empty_access_list[empty_access_index[file_id]].second, total_access_list[total_access_index[file_id]].second), file_id);
+    };
 
     uint64_t records_parsed = 0;
     uint64_t lookup_count = 0;  // completed get lookups
@@ -179,6 +190,13 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
             FileMetadata new_metadata(curr_record);
             new_metadata.creation_lookup = lookup_count;
             file_map[curr_record.file_id] = new_metadata;
+
+            std::pair<uint64_t, uint64_t> input_pair(new_metadata.file_id, 0);
+            total_access_list.push_back(input_pair);
+            total_access_index[new_metadata.file_id] = total_access_list.size() - 1;
+            empty_access_list.push_back(input_pair);
+            empty_access_index[new_metadata.file_id] = empty_access_list.size() - 1;
+
             continue;
         }
         if (curr_record.record_type == kFileMove) {
@@ -194,8 +212,17 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
                 it->second.deleted = true;
             }
 
-            empty_access_map.erase(curr_record.file_id);
-            total_access_map.erase(curr_record.file_id);
+            if (config.module_limit_optimized == kFileInfoRatio && total_access_list[total_access_index[curr_record.file_id]].second) ratio_tree.erase(ratio_key(curr_record.file_id));
+            if (empty_access_list[empty_access_index[curr_record.file_id]].second) empty_nonzero_count--;
+            empty_access_list.erase(empty_access_list.begin() + empty_access_index[curr_record.file_id]);
+            for (size_t i=empty_access_index[curr_record.file_id]; i<empty_access_list.size(); i++)
+                empty_access_index[empty_access_list[i].first] = i;
+            empty_access_index.erase(curr_record.file_id);
+
+            total_access_list.erase(total_access_list.begin() + total_access_index[curr_record.file_id]);
+            for (size_t i=total_access_index[curr_record.file_id]; i<total_access_list.size(); i++)
+                total_access_index[total_access_list[i].first] = i;
+            total_access_index.erase(curr_record.file_id);
             continue;
         }
 
@@ -218,17 +245,17 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
 
             switch (config.module_limit_optimized) {
                 case kCostModel:
-                    module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_map, empty_access_map, lookup_count - file_metadata.creation_lookup, file_metadata.deleted);
+                    module_limit = get_utility_based_module_count(config, total_modules, curr_probe, total_access_list, total_access_index, empty_access_list, empty_access_index, lookup_count - file_metadata.creation_lookup, file_metadata.deleted);
                     break;
                 case kFileInfoPercentile:
-                    module_limit = get_module_count_file_percentile(total_modules, curr_probe, empty_access_map, file_metadata.deleted);
+                    module_limit = file_metadata.deleted ? total_modules : get_module_count_file_percentile(total_modules, empty_access_index[file_id], empty_nonzero_count-1,  empty_access_list[empty_access_index[file_id]].second, file_metadata.deleted);
                     break;
                 case kFileInfoRatio: {
                     double empty_fraction = 0.0;
                     (levelwise_total_count.size() > curr_probe.level && levelwise_total_count[curr_probe.level])?
                         empty_fraction = 1.00 * levelwise_empty_count[curr_probe.level] / levelwise_total_count[curr_probe.level]
                     :empty_fraction = 0.0;
-                    module_limit = get_module_count_file_ratio(empty_fraction, total_modules, curr_probe, total_access_map, empty_access_map);
+                    module_limit = file_metadata.deleted ? total_modules : get_module_count_file_ratio(empty_fraction, total_modules, ratio_tree, total_access_list[total_access_index[file_id]].second, empty_access_list[empty_access_index[file_id]].second, file_metadata.deleted);
                     break;
                 }
                 case kWorkInfo: {
@@ -236,7 +263,7 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
                     (levelwise_total_count.size() > curr_probe.level && levelwise_total_count[curr_probe.level])?
                         empty_fraction = 1.00 * levelwise_empty_count[curr_probe.level] / levelwise_total_count[curr_probe.level]
                     :empty_fraction = 0.0;
-                    module_limit = get_module_count_workload_ratio(empty_fraction, curr_probe.level, total_modules);
+                    module_limit = get_module_count_workload_ratio(empty_fraction, total_modules, file_metadata.deleted);
                     break;
                 }
                 case kVanilla:
@@ -249,13 +276,43 @@ SimulationResult simulate_modular(const char* trace_file_name, const SimulationC
                 levelwise_empty_count.resize(curr_probe.level+1);
             }
             if (!file_metadata.deleted) {
-                total_access_map[file_id]++;
+                uint64_t index = total_access_index[file_id];
+                if (config.module_limit_optimized == kFileInfoRatio && total_access_list[index].second) ratio_tree.erase(ratio_key(file_id));
+                total_access_list[index].second += 1;
+
+                int64_t next_index;
+                uint64_t access_count = total_access_list[index].second;
+                for (next_index=index-1; next_index >= 0; next_index--)
+                    if (total_access_list[next_index].second >= access_count)
+                        break;
+                
+                next_index++;
+                if (next_index != (int64_t)index) {
+                    std::swap(total_access_list[index], total_access_list[next_index]);
+                    total_access_index[total_access_list[index].first] = index;
+                    total_access_index[total_access_list[next_index].first] = next_index;
+                }
                 levelwise_total_count[curr_probe.level]++;
             }
             if (curr_probe.file_outcome == FileOutcome::kNotFound && !file_metadata.deleted) {
-                empty_access_map[file_id]++;
+                uint64_t index = empty_access_index[file_id];
+                if (++empty_access_list[index].second == 1) empty_nonzero_count++;
+
+                int64_t next_index;
+                uint64_t access_count = empty_access_list[index].second;
+                for (next_index=index-1; next_index >= 0; next_index--)
+                    if (empty_access_list[next_index].second >= access_count)
+                        break;
+                
+                next_index++;
+                if (next_index != (int64_t)index) {
+                    std::swap(empty_access_list[index], empty_access_list[next_index]);
+                    empty_access_index[empty_access_list[index].first] = index;
+                    empty_access_index[empty_access_list[next_index].first] = next_index;
+                }
                 levelwise_empty_count[curr_probe.level]++;
             }
+            if (config.module_limit_optimized == kFileInfoRatio && !file_metadata.deleted) ratio_tree.insert(ratio_key(file_id));
 
             auto outcome = curr_probe.file_outcome;
             bool real_verdict = (outcome==FileOutcome::kFoundValue) || (outcome==FileOutcome::kFoundMergeOperand) || (outcome==FileOutcome::kFoundTombstone);

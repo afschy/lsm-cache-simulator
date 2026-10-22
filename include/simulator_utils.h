@@ -3,8 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <random>
+#include <utility>
 #include <vector>
 #include <unordered_map>
+#include <ext/pb_ds/assoc_container.hpp>
+#include <ext/pb_ds/tree_policy.hpp>
 #include "cache.h"
 #include "record_parser.h"
 #include "simulation_config_result.h"
@@ -65,8 +68,10 @@ inline uint16_t get_utility_based_module_count(
         const SimulationConfig& config,
         const uint16_t& total_modules,
         const Probe& curr_probe,
-        const std::unordered_map<uint64_t, uint64_t>& total_access_map,
-        std::unordered_map<uint64_t, uint64_t>& empty_access_map,
+        const std::vector<std::pair<uint64_t, uint64_t>>& total_access_list,
+        const std::unordered_map<uint64_t, uint64_t>& total_access_index,
+        const std::vector<std::pair<uint64_t, uint64_t>>& empty_access_list,
+        const std::unordered_map<uint64_t, uint64_t>& empty_access_index,
         uint64_t lookup_count,
         bool deleted_file=false) {
 
@@ -75,14 +80,14 @@ inline uint16_t get_utility_based_module_count(
 
     uint16_t used_modules = total_modules;
 
-    auto total_it = total_access_map.find(curr_probe.file_id);
-    if (total_it == total_access_map.end())
+    auto total_it = total_access_index.find(curr_probe.file_id);
+    if (total_it == total_access_index.end())
         return used_modules;
 
-    // a file missing from the empty map has had no empty probes
-    auto empty_it = empty_access_map.find(curr_probe.file_id);
-    double total_count = total_it->second;
-    double empty_count = (empty_it == empty_access_map.end()) ? 0 : empty_it->second;
+    // a file missing from the empty index has had no empty probes
+    auto empty_it = empty_access_index.find(curr_probe.file_id);
+    double total_count = total_access_list[total_it->second].second;
+    double empty_count = (empty_it == empty_access_index.end()) ? 0 : empty_access_list[empty_it->second].second;
     double found_frac = (total_count - empty_count) / total_count;
     // beta: fraction of the lookups in lookup_count that probed this file
     double beta = total_count / lookup_count;
@@ -108,28 +113,20 @@ inline uint16_t get_utility_based_module_count(
 // for optimized modular policies, calculates the amount of modules to use based on access pattern
 inline uint16_t get_module_count_file_percentile(
         const uint16_t& total_modules, 
-        const Probe& curr_probe, 
-        const std::unordered_map<uint64_t, uint64_t>& empty_access_map,
+        const uint64_t curr_index,
+        const uint64_t max_index,
+        const uint64_t empty_count,
         bool deleted_file=false) {
 
     if (deleted_file) 
         return total_modules;
+    if (!empty_count)
+        return 0;
 
-    auto self_it = empty_access_map.find(curr_probe.file_id);
     uint16_t module_limit = total_modules;
 
-    // a file that has never come up empty has nothing to filter for yet
-    if (self_it == empty_access_map.end()) {
-        module_limit = 0;
-        return module_limit;
-    }
-
-    uint32_t self_count = self_it->second;
-    uint32_t higher_count = 0, lower_equal_count = 0;
-    for (const auto& it : empty_access_map) {
-        if (it.second > self_count) higher_count++;
-        else lower_equal_count++;
-    }
+    uint32_t lower_equal_count = max_index - curr_index + 1;
+    uint32_t higher_count = curr_index;
 
     // the file counts itself, so the denominator is at least 1
     module_limit = static_cast<uint16_t>(round(1.00 * total_modules * lower_equal_count / (higher_count + lower_equal_count)));
@@ -138,46 +135,32 @@ inline uint16_t get_module_count_file_percentile(
     return module_limit;
 }
 
+// <adjusted_ratio, file_id> order-statistics tree, holds every file with a non-zero total count
+using RatioKey = std::pair<double, uint64_t>;
+using RatioTree = __gnu_pbds::tree<RatioKey, __gnu_pbds::null_type, std::less<RatioKey>,
+                                   __gnu_pbds::rb_tree_tag, __gnu_pbds::tree_order_statistics_node_update>;
+
+// keys must be rebuilt with this exact expression so that erasures find them
+inline double get_adjusted_ratio(uint64_t empty_count, uint64_t total_count) {
+    return 1.00 * empty_count * empty_count / total_count;
+}
+
 inline uint16_t get_module_count_file_ratio(
         const double& empty_fraction,
-        const uint16_t& total_modules, 
-        const Probe& curr_probe, 
-        const std::unordered_map<uint64_t, uint64_t>& total_access_map,
-        const std::unordered_map<uint64_t, uint64_t>& empty_access_map,
+        const uint16_t& total_modules,
+        const RatioTree& ratio_tree,
+        const uint64_t total_count,
+        const uint64_t empty_count,
         bool deleted_file=false) {
 
-    if (deleted_file) 
+    if (deleted_file)
         return total_modules;
-
-    auto total_it = total_access_map.find(curr_probe.file_id);
-    auto empty_it = empty_access_map.find(curr_probe.file_id);
-
-    if (total_it == total_access_map.end() || empty_it == empty_access_map.end())
+    if (!empty_count)
         return 0;
 
-    uint64_t total_count = total_it->second, empty_count = empty_it->second;
-    if (total_count == 0) return 0;
-
-    double adjusted_ratio = 1.00 * empty_count * empty_count / total_count;
-
-    uint32_t higher_count = 0;
-    uint32_t lower_equal_count = 0;
-    for (auto total_it: total_access_map) {
-        total_count = total_it.second;
-        if (total_count == 0) {
-            lower_equal_count++;
-            continue;
-        }
-
-        empty_count = 0;
-        auto empty_it = empty_access_map.find(total_it.first);
-        if (empty_it != empty_access_map.end()) empty_count = empty_it->second;
-
-        double curr_ratio = 1.00 * empty_count * empty_count / total_count;
-        if (curr_ratio > adjusted_ratio) higher_count++;
-        else lower_equal_count++;
-    }
-
+    // the file counts itself, so the denominator is at least 1
+    uint64_t lower_equal_count = ratio_tree.order_of_key({get_adjusted_ratio(empty_count, total_count), UINT64_MAX});
+    uint64_t higher_count = ratio_tree.size() - lower_equal_count;
 
     uint16_t module_limit = static_cast<uint16_t>(round(1.00 * total_modules * lower_equal_count / (higher_count + lower_equal_count)));
     module_limit = std::min(module_limit, total_modules);
@@ -189,7 +172,6 @@ inline uint16_t get_module_count_file_ratio(
 // for optimized modular policies, calculates the amoung of modules based on workload empty query percentage
 inline uint16_t get_module_count_workload_ratio(
         const double& empty_fraction,
-        const uint8_t& level,
         const uint16_t& total_modules, 
         bool deleted_file=false) {
 
@@ -197,11 +179,6 @@ inline uint16_t get_module_count_workload_ratio(
         return total_modules;
     if (deleted_file)
         return total_modules;
-    // if (level > 1)
     return ceil(empty_fraction * total_modules);
-
-    // uint16_t used_modules = ceil(2.0 * empty_fraction * total_modules);
-    // used_modules = std::min(total_modules, used_modules);
-    // return used_modules;
 }
 
